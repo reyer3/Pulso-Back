@@ -74,22 +74,6 @@ class ProductivityResponse(BaseModel):
 
 
 # =============================================================================
-# DEPENDENCY INJECTION
-# =============================================================================
-
-async def get_data_adapter() -> DataSourceAdapter:
-    """Get data source adapter based on configuration"""
-    return DataSourceFactory.create_adapter()
-
-
-async def get_dashboard_service(
-    adapter: DataSourceAdapter = Depends(get_data_adapter)
-) -> DashboardServiceV2:
-    """Get dashboard service with injected adapter"""
-    return DashboardServiceV2(adapter)
-
-
-# =============================================================================
 # ROUTER SETUP
 # =============================================================================
 

@@ -1,8 +1,8 @@
+# --- START OF FILE app/main.py ---
 """
 🚀 Pulso-Back FastAPI Application
-Main entry point for the API server
+Punto de entrada principal para el servidor de la API, con gestión del ciclo de vida.
 """
-
 import logging
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
@@ -14,11 +14,12 @@ from prometheus_client import start_http_server
 
 from app.api.v1.api import api_router
 from app.core.config import settings
-from app.core.database import init_db
+from app.core.database import init_db, close_db
+from app.core.cache import cache as redis_cache
 from app.core.logging import setup_logging
-from app.core.middleware import PrometheusMiddleware, TimingMiddleware
+from app.core.middleware import TimingMiddleware, PrometheusMiddleware, SecurityMiddleware
 
-# Setup logging
+# Configurar el logging tan pronto como sea posible
 setup_logging()
 logger = logging.getLogger(__name__)
 
@@ -26,35 +27,45 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """
-    Application lifespan events
+    Gestiona los eventos de arranque y parada de la aplicación.
     """
-    # Startup
-    logger.info("Starting Pulso-Back API...")
-    
-    try:
-        # Initialize database
-        await init_db()
-        logger.info("Database initialized")
-        
-        # Start Prometheus metrics server
-        if settings.PROMETHEUS_ENABLED:
-            start_http_server(settings.PROMETHEUS_PORT)
-            logger.info(f"Prometheus metrics server started on port {settings.PROMETHEUS_PORT}")
-        
-        logger.info("Pulso-Back API started successfully")
-        yield
-        
-    except Exception as e:
-        logger.error(f"Failed to start application: {e}")
-        raise
-    finally:
-        # Shutdown
-        logger.info("Shutting down Pulso-Back API...")
+    # --- LÓGICA DE ARRANQUE (STARTUP) ---
+    logger.info("Iniciando la API Pulso-Back...")
+
+    # Inicializar el pool de conexiones de Redis
+    await redis_cache.init_redis()
+    logger.info("Pool de conexiones de Redis inicializado.")
+
+    # Inicializar la base de datos (crear tablas si no existen)
+    # await init_db()  # Descomentar si necesitas crear tablas al inicio
+    # logger.info("Base de datos inicializada.")
+
+    # Iniciar el servidor de métricas de Prometheus
+    if settings.PROMETHEUS_ENABLED:
+        start_http_server(settings.PROMETHEUS_PORT)
+        logger.info(f"Servidor de métricas Prometheus iniciado en el puerto {settings.PROMETHEUS_PORT}")
+
+    logger.info("Arranque de la API Pulso-Back completado con éxito.")
+
+    yield  # La aplicación se ejecuta aquí
+
+    # --- LÓGICA DE PARADA (SHUTDOWN) ---
+    logger.info("Deteniendo la API Pulso-Back...")
+
+    # Cerrar el pool de conexiones de Redis
+    await redis_cache.close()
+    logger.info("Conexiones de Redis cerradas.")
+
+    # Cerrar el pool de conexiones de la base de datos
+    await close_db()
+    logger.info("Conexiones de base de datos cerradas.")
+
+    logger.info("Parada de la API Pulso-Back completada.")
 
 
 def create_app() -> FastAPI:
     """
-    Create FastAPI application with all configurations
+    Crea la instancia de la aplicación FastAPI con toda la configuración.
     """
     app = FastAPI(
         title=settings.API_TITLE,
@@ -63,10 +74,12 @@ def create_app() -> FastAPI:
         openapi_url=f"/api/{settings.API_VERSION}/openapi.json",
         docs_url="/docs",
         redoc_url="/redoc",
-        lifespan=lifespan,
+        lifespan=lifespan,  # <-- Aquí se conecta el gestor del ciclo de vida
     )
 
-    # Middleware
+    # --- Middleware ---
+    # El orden es importante: se ejecutan de abajo hacia arriba.
+    app.add_middleware(SecurityMiddleware)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.CORS_ORIGINS,
@@ -74,51 +87,34 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
-    app.add_middleware(GZipMiddleware, minimum_size=1000)
-    app.add_middleware(TimingMiddleware)
-    
     if settings.PROMETHEUS_ENABLED:
         app.add_middleware(PrometheusMiddleware)
+    app.add_middleware(GZipMiddleware, minimum_size=1000)
+    app.add_middleware(TimingMiddleware) # Este middleware debe ser uno de los últimos
 
-    # Routes
+    # --- Rutas ---
     app.include_router(api_router, prefix=f"/api/{settings.API_VERSION}")
 
     return app
 
-
-# Create app instance
+# Crear la instancia de la aplicación
 app = create_app()
 
-
-@app.get("/health")
+# Endpoints de salud en la raíz para simplicidad
+@app.get("/health", tags=["Health"])
 async def health_check():
-    """
-    Health check endpoint for load balancers
-    """
-    return {
-        "status": "healthy",
-        "service": "pulso-back",
-        "version": settings.API_VERSION,
-        "environment": settings.ENVIRONMENT,
-    }
+    """Endpoint de salud para balanceadores de carga."""
+    return {"status": "healthy", "service": "pulso-back", "version": settings.API_VERSION}
 
-
-@app.get("/")
+@app.get("/", tags=["Health"])
 async def root():
-    """
-    Root endpoint
-    """
-    return {
-        "message": "Pulso-Back API",
-        "docs": "/docs",
-        "health": "/health",
-        "version": settings.API_VERSION,
-    }
+    """Endpoint raíz."""
+    return {"message": f"Bienvenido a {settings.API_TITLE}", "docs_url": "/docs"}
 
-
-if __name__ == "__main__":
+# --- Script de ejecución para desarrollo ---
+def main():
+    """Inicia el servidor Uvicorn para desarrollo."""
     import uvicorn
-    
     uvicorn.run(
         "app.main:app",
         host=settings.HOST,
@@ -126,3 +122,6 @@ if __name__ == "__main__":
         reload=settings.RELOAD,
         log_level=settings.LOG_LEVEL.lower(),
     )
+
+if __name__ == "__main__":
+    main()
