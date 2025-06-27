@@ -1,0 +1,62 @@
+# 🛠️ Development Docker Compose
+version: '3.8'
+
+services:
+  pulso-api:
+    build:
+      context: ..
+      dockerfile: docker/api.Dockerfile
+      target: development
+    container_name: pulso-api-dev
+    volumes:
+      - ..:/app
+      - /app/__pycache__
+    environment:
+      - ENVIRONMENT=development
+      - RELOAD=true
+      - DEBUG=true
+    ports:
+      - "8000:8000"
+    labels: []  # Sin Traefik en desarrollo
+
+  pulso-etl:
+    build:
+      context: ..
+      dockerfile: docker/etl.Dockerfile
+      target: development
+    container_name: pulso-etl-dev
+    volumes:
+      - ..:/app
+    environment:
+      - ENVIRONMENT=development
+    ports:
+      - "8001:8001"
+
+  postgres:
+    ports:
+      - "5432:5432"
+
+  redis:
+    image: redis:7-alpine
+    container_name: pulso-redis-dev
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_dev_data:/data
+
+  # Adminer para PostgreSQL
+  adminer:
+    image: adminer:latest
+    container_name: pulso-adminer
+    ports:
+      - "8080:8080"
+    environment:
+      - ADMINER_DEFAULT_SERVER=postgres
+
+volumes:
+  redis_dev_data:
+
+networks:
+  default:
+    name: pulso_dev

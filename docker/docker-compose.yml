@@ -1,0 +1,152 @@
+version: '3.8'
+
+services:
+  # 🚀 FastAPI Service
+  pulso-api:
+    build:
+      context: ..
+      dockerfile: docker/api.Dockerfile
+      target: production
+    container_name: pulso-api
+    restart: unless-stopped
+    environment:
+      - ENVIRONMENT=production
+      - REDIS_URL=redis://redis:6379/0
+      - POSTGRES_URL=postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/pulso_db
+      - BIGQUERY_PROJECT_ID=${BIGQUERY_PROJECT_ID}
+      - BIGQUERY_DATASET=${BIGQUERY_DATASET}
+      - GOOGLE_APPLICATION_CREDENTIALS=/app/credentials/service-account.json
+      - LOG_LEVEL=INFO
+      - SECRET_KEY=${SECRET_KEY}
+      - API_KEY=${API_KEY}
+    volumes:
+      - ../credentials:/app/credentials:ro
+      - ../logs:/app/logs
+    depends_on:
+      - redis
+      - postgres
+    networks:
+      - traefik_network
+      - pulso_network
+    labels:
+      # Traefik configuration
+      - "traefik.enable=true"
+      - "traefik.http.routers.pulso-api.rule=Host(`pulso-api.${DOMAIN}`)"
+      - "traefik.http.routers.pulso-api.entrypoints=websecure"
+      - "traefik.http.routers.pulso-api.tls.certresolver=letsencrypt"
+      - "traefik.http.services.pulso-api.loadbalancer.server.port=8000"
+      # CORS middleware
+      - "traefik.http.routers.pulso-api.middlewares=cors@file"
+      # Rate limiting
+      - "traefik.http.middlewares.api-ratelimit.ratelimit.burst=100"
+
+  # 📊 ETL Service  
+  pulso-etl:
+    build:
+      context: ..
+      dockerfile: docker/etl.Dockerfile
+      target: production
+    container_name: pulso-etl
+    restart: unless-stopped
+    environment:
+      - ENVIRONMENT=production
+      - REDIS_URL=redis://redis:6379/0
+      - POSTGRES_URL=postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/pulso_db
+      - BIGQUERY_PROJECT_ID=${BIGQUERY_PROJECT_ID}
+      - BIGQUERY_DATASET=${BIGQUERY_DATASET}
+      - GOOGLE_APPLICATION_CREDENTIALS=/app/credentials/service-account.json
+      - ETL_SCHEDULE_CRON=${ETL_SCHEDULE_CRON:-0 */3 * * *}
+      - LOG_LEVEL=INFO
+    volumes:
+      - ../credentials:/app/credentials:ro
+      - ../logs:/app/logs
+      - ../etl_outputs:/app/etl_outputs
+    depends_on:
+      - redis
+      - postgres
+    networks:
+      - pulso_network
+
+  # 🗄️ PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: pulso-postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=pulso_db
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_INITDB_ARGS="--encoding=UTF-8 --lc-collate=C --lc-ctype=C"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ../scripts/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - ../config/postgresql.conf:/etc/postgresql/postgresql.conf
+    networks:
+      - pulso_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # 📊 Monitoring - Prometheus
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: pulso-prometheus
+    restart: unless-stopped
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    volumes:
+      - ../config/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    networks:
+      - pulso_network
+      - traefik_network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.prometheus.rule=Host(`prometheus.${DOMAIN}`)"
+      - "traefik.http.routers.prometheus.entrypoints=websecure"
+      - "traefik.http.routers.prometheus.tls.certresolver=letsencrypt"
+      - "traefik.http.services.prometheus.loadbalancer.server.port=9090"
+      - "traefik.http.routers.prometheus.middlewares=auth@file"
+
+  # 📈 Monitoring - Grafana
+  grafana:
+    image: grafana/grafana:latest
+    container_name: pulso-grafana
+    restart: unless-stopped
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_INSTALL_PLUGINS=grafana-clock-panel,grafana-simple-json-datasource
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ../config/grafana/provisioning:/etc/grafana/provisioning
+    networks:
+      - pulso_network
+      - traefik_network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.grafana.rule=Host(`grafana.${DOMAIN}`)"
+      - "traefik.http.routers.grafana.entrypoints=websecure"
+      - "traefik.http.routers.grafana.tls.certresolver=letsencrypt"
+      - "traefik.http.services.grafana.loadbalancer.server.port=3000"
+
+volumes:
+  postgres_data:
+  prometheus_data:
+  grafana_data:
+
+networks:
+  traefik_network:
+    external: true  # Tu red Traefik existente
+  pulso_network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

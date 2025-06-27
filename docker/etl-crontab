@@ -1,0 +1,10 @@
+# ETL Crontab - Refresh every 3 hours
+0 */3 * * * cd /app && python etl/etl_main.py --pipeline dashboard
+30 */6 * * * cd /app && python etl/etl_main.py --pipeline evolution
+0 9 * * * cd /app && python etl/etl_main.py --pipeline assignment
+
+# Cleanup logs weekly
+0 2 * * 0 find /app/logs -name "*.log" -mtime +7 -delete
+
+# Health check hourly
+0 * * * * curl -f http://localhost:8000/health || echo "API health check failed" >> /app/logs/health.log
