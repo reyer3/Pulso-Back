@@ -28,12 +28,16 @@ class Settings(BaseSettings):
     RELOAD: bool = Field(default=False)
     WORKERS: int = Field(default=1)
     
+    # Data Source Configuration
+    DATA_SOURCE_TYPE: str = Field(default="bigquery", description="Data source type: bigquery or postgresql")
+    
     # Database
     POSTGRES_HOST: str = Field(default="localhost")
     POSTGRES_PORT: int = Field(default=5432)
     POSTGRES_DB: str = Field(default="pulso_db")
     POSTGRES_USER: str = Field(default="postgres")
     POSTGRES_PASSWORD: str = Field(default="password")
+    POSTGRES_SCHEMA: str = Field(default="public")
     POSTGRES_URL: Optional[str] = Field(default=None)
     
     # Redis
@@ -113,6 +117,14 @@ class Settings(BaseSettings):
             return [origin.strip() for origin in v.split(",")]
         return v
     
+    @validator('DATA_SOURCE_TYPE', pre=True)
+    def validate_data_source_type(cls, v: str) -> str:
+        """Validate data source type"""
+        allowed_types = ["bigquery", "postgresql"]
+        if v.lower() not in allowed_types:
+            raise ValueError(f"DATA_SOURCE_TYPE must be one of: {allowed_types}")
+        return v.lower()
+    
     @property
     def is_development(self) -> bool:
         """Check if running in development mode"""
@@ -130,6 +142,12 @@ class Settings(BaseSettings):
 
 # Global settings instance
 settings = Settings()
+
+
+def get_settings() -> Settings:
+    """Get settings instance (used by dependency injection)"""
+    return settings
+
 
 # Validate critical settings in production
 if settings.is_production:
