@@ -12,7 +12,7 @@ import json
 import logging
 from dataclasses import dataclass
 
-from app.core.database import get_database_manager, execute_query, DatabaseManager
+from app.database.connection import get_database_manager, execute_query, DatabaseManager
 
 
 @dataclass

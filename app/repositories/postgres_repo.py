@@ -1,33 +1,46 @@
 """
-🗄️ PostgreSQL repository implementation (production ready)
+🗄️ PostgreSQL Repository Implementation (Production Ready)
 """
-
 from typing import Any, Dict, List, Optional
 
 from app.repositories.base import BaseRepository
-from app.services.postgres_service import PostgresService
+from app.database.connection import DatabaseManager, get_database_manager
 
 class PostgresRepository(BaseRepository):
     """
-    PostgreSQL repository for data access, using PostgresService (asyncpg)
+    PostgreSQL repository for data access, using the efficient,
+    connection-pooled DatabaseManager with asyncpg.
     """
-    def __init__(self, dsn: Optional[str] = None):
+    def __init__(self, db_manager: Optional[DatabaseManager] = None):
         super().__init__()
-        self.pg_service = PostgresService(dsn)
-        self.is_connected = False  # Optionally, you could check at __init__
+        self._db_manager = db_manager
+        self.is_connected = False
+
+    async def _get_db_manager(self) -> DatabaseManager:
+        if self._db_manager is None:
+            self._db_manager = await get_database_manager()
+        return self._db_manager
 
     async def connect(self) -> None:
-        # Optionally test connection here for early failure
-        self.is_connected = await self.pg_service.health_check()
+        """
+        Ensures the database manager is initialized and the connection
+        pool is ready.
+        """
+        db_manager = await self._get_db_manager()
+        self.is_connected = await db_manager.health_check()
         if not self.is_connected:
-            raise ConnectionError("Failed to connect to PostgreSQL")
+            raise ConnectionError("Failed to connect to PostgreSQL via DatabaseManager.")
 
     async def disconnect(self) -> None:
-        # PostgresService opens/closes per query; nothing to disconnect globally
+        """
+        The DatabaseManager handles connection pooling globally,
+        so a repository-level disconnect is not needed.
+        """
         self.is_connected = False
 
     async def health_check(self) -> bool:
-        return await self.pg_service.health_check()
+        db_manager = await self._get_db_manager()
+        return await db_manager.health_check()
 
     async def execute_query(
         self,
@@ -35,12 +48,12 @@ class PostgresRepository(BaseRepository):
         params: Optional[Dict[str, Any]] = None
     ) -> List[Dict[str, Any]]:
         """
-        Execute a SQL query and return a list of dicts (records)
+        Executes a query and returns a list of records as dictionaries.
         """
-        # Convert params dict to a positional tuple for asyncpg ($1, $2, ...)
+        db_manager = await self._get_db_manager()
+        # asyncpg uses positional parameters ($1, $2), so we pass the values.
         param_values = tuple(params.values()) if params else tuple()
-        records = await self.pg_service.fetch(query, *param_values)
-        # asyncpg.Record to dict
+        records = await db_manager.execute_query(query, *param_values, fetch="all")
         return [dict(r) for r in records]
 
     async def execute_single(
@@ -48,8 +61,12 @@ class PostgresRepository(BaseRepository):
         query: str,
         params: Optional[Dict[str, Any]] = None
     ) -> Optional[Dict[str, Any]]:
+        """
+        Executes a query and returns a single record as a dictionary or None.
+        """
+        db_manager = await self._get_db_manager()
         param_values = tuple(params.values()) if params else tuple()
-        record = await self.pg_service.fetchrow(query, *param_values)
+        record = await db_manager.execute_query(query, *param_values, fetch="one")
         return dict(record) if record else None
 
     async def execute_scalar(
@@ -57,7 +74,9 @@ class PostgresRepository(BaseRepository):
         query: str,
         params: Optional[Dict[str, Any]] = None
     ) -> Any:
+        """
+        Executes a query and returns a single value from the first record.
+        """
+        db_manager = await self._get_db_manager()
         param_values = tuple(params.values()) if params else tuple()
-        return await self.pg_service.fetchval(query, *param_values)
-
-    # Puedes agregar aquí helpers de paginación, batch, transacciones, etc. según tu dominio
+        return await db_manager.execute_query(query, *param_values, fetch="val")
