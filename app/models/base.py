@@ -6,7 +6,7 @@ Shared models and utilities for API responses
 import datetime
 from typing import Any, Dict, List, Optional, Union
 
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator, ConfigDict  # ✅ V2: validator → field_validator
 
 
 class BaseResponse(BaseModel):
@@ -39,20 +39,36 @@ class PaginatedResponse(BaseResponse):
     has_next: bool
     has_prev: bool
     
-    @validator('total_pages', pre=True, always=True)
-    def calculate_total_pages(cls, v, values):
+    # ✅ V2: Updated validator syntax
+    @field_validator('total_pages', mode='before')
+    @classmethod
+    def calculate_total_pages(cls, v, info):
+        if hasattr(info, 'data'):  # V2 compatibility
+            values = info.data
+        else:
+            values = info.data if hasattr(info, 'data') else {}
         total_count = values.get('total_count', 0)
         page_size = values.get('page_size', 1)
         return (total_count + page_size - 1) // page_size if total_count > 0 else 0
     
-    @validator('has_next', pre=True, always=True)
-    def calculate_has_next(cls, v, values):
+    @field_validator('has_next', mode='before')
+    @classmethod
+    def calculate_has_next(cls, v, info):
+        if hasattr(info, 'data'):
+            values = info.data
+        else:
+            values = info.data if hasattr(info, 'data') else {}
         page = values.get('page', 1)
         total_pages = values.get('total_pages', 0)
         return page < total_pages
     
-    @validator('has_prev', pre=True, always=True)
-    def calculate_has_prev(cls, v, values):
+    @field_validator('has_prev', mode='before')
+    @classmethod
+    def calculate_has_prev(cls, v, info):
+        if hasattr(info, 'data'):
+            values = info.data
+        else:
+            values = info.data if hasattr(info, 'data') else {}
         page = values.get('page', 1)
         return page > 1
 
@@ -65,8 +81,14 @@ class FilterRequest(BaseModel):
     date_from: Optional[datetime.date] = None
     date_to: Optional[datetime.date] = None
     
-    @validator('date_to')
-    def date_to_must_be_after_date_from(cls, v, values):
+    # ✅ V2: Updated validator syntax
+    @field_validator('date_to')
+    @classmethod
+    def date_to_must_be_after_date_from(cls, v, info):
+        if hasattr(info, 'data'):
+            values = info.data
+        else:
+            values = info.data if hasattr(info, 'data') else {}
         date_from = values.get('date_from')
         if date_from and v and v < date_from:
             raise ValueError('date_to must be after date_from')
@@ -128,9 +150,11 @@ class CamelCaseModel(BaseModel):
     Base model with camelCase field aliases
     """
     
-    class Config:
-        alias_generator = to_camel_case
-        allow_population_by_field_name = True
+    # ✅ V2: Updated configuration
+    model_config = ConfigDict(
+        alias_generator=to_camel_case,
+        populate_by_name=True  # ✅ V2: allow_population_by_field_name → populate_by_name
+    )
 
 
 # Response wrapper
