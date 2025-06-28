@@ -12,16 +12,13 @@ Features:
 import asyncio
 import uuid
 from datetime import datetime, timezone
-from typing import List, Dict, Any, Optional, Union
-import logging
-import time
-from contextlib import asynccontextmanager
+from typing import List, Dict, Any, Optional
 
-from app.etl.config import ETLConfig, ExtractionConfig, ExtractionMode
+from app.core.logging import LoggerMixin
+from app.etl.config import ETLConfig, ExtractionMode
 from app.etl.extractors.bigquery_extractor import BigQueryExtractor
 from app.etl.loaders.postgres_loader import PostgresLoader, LoadResult
 from app.etl.watermarks import get_watermark_manager, WatermarkManager
-from app.core.logging import LoggerMixin
 
 
 class PipelineResult:

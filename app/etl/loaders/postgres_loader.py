@@ -10,31 +10,17 @@ Features:
 - Comprehensive error handling and rollback
 """
 
-import asyncio
 import time
-from datetime import datetime, timezone
-from typing import List, Dict, Any, Optional, Union, Type
-import logging
 from dataclasses import dataclass
+from datetime import datetime, timezone
+from typing import List, Dict, Any, Optional, Type, AsyncGenerator
 
-import asyncpg
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy import text
-from sqlalchemy.dialects.postgresql import insert
-
-from app.etl.config import ETLConfig, ExtractionConfig
-from app.core.database import get_postgres_engine
 from app.core.logging import LoggerMixin
 from app.models.database import (
     TABLE_MODEL_MAPPING,
-    DashboardDataModel,
-    EvolutionDataModel,
-    AssignmentDataModel,
-    OperationDataModel,
-    ProductivityDataModel,
     Base
 )
+from app.services.postgres_service import PostgresService
 
 
 @dataclass
@@ -62,22 +48,21 @@ class PostgresLoader(LoggerMixin):
     - Detailed load statistics and error tracking
     """
     
-    def __init__(self, engine: Optional[AsyncEngine] = None):
+    def __init__(self, pg_service: Optional[PostgresService] = None):
         super().__init__()
-        self.engine = engine or get_postgres_engine()
-        self.async_session_factory = sessionmaker(
-            self.engine, class_=AsyncSession, expire_on_commit=False
-        )
+        self.pg_service = pg_service or PostgresService()
         self.max_batch_size = 1000  # Smaller batches for ORM operations
         self.connection_timeout = 30
     
-    def _get_model_class(self, table_name: str) -> Type[Base]:
+    @staticmethod
+    def _get_model_class(table_name: str) -> Type[Base]:
         """Get SQLAlchemy model class for table"""
         if table_name not in TABLE_MODEL_MAPPING:
             raise ValueError(f"No model mapping found for table: {table_name}")
         return TABLE_MODEL_MAPPING[table_name]
     
-    def _get_primary_key_columns(self, model_class: Type[Base]) -> List[str]:
+    @staticmethod
+    def _get_primary_key_columns(model_class: Type[Base]) -> List[str]:
         """Extract primary key column names from SQLAlchemy model"""
         return [col.name for col in model_class.__table__.primary_key.columns]
     
@@ -121,38 +106,48 @@ class PostgresLoader(LoggerMixin):
         # Add metadata update
         set_clause += ", updated_at = CURRENT_TIMESTAMP"
         
-        # Build VALUES clause
-        values_placeholder = ", ".join([
-            f"({', '.join([f':{col}_{i}' for col in all_columns])})"
-            for i in range(len(data_batch))
-        ])
+        # Build VALUES clause with positional parameters
+        values_placeholders = []
+        param_idx = 1
+        for _ in range(len(data_batch)):
+            placeholders_for_row = []
+            for _ in all_columns:
+                placeholders_for_row.append(f"${param_idx}")
+                param_idx += 1
+            values_placeholders.append(f"({', '.join(placeholders_for_row)})")
+        
+        values_clause = ", ".join(values_placeholders)
         
         upsert_sql = f"""
         INSERT INTO {table_name} ({columns_str})
-        VALUES {values_placeholder}
+        VALUES {values_clause}
         ON CONFLICT ({conflict_columns_str})
         DO UPDATE SET {set_clause}
         """
         
         return upsert_sql
     
+    @staticmethod
     def _prepare_batch_parameters(
-        self, 
-        data_batch: List[Dict[str, Any]]
-    ) -> Dict[str, Any]:
+            data_batch: List[Dict[str, Any]],
+        model_class: Type[Base]
+    ) -> List[Any]:
         """
-        Prepare parameters for batch UPSERT operation
+        Prepare parameters for batch UPSERT operation using positional parameters.
         
         Args:
             data_batch: List of data dictionaries
+            model_class: SQLAlchemy model class to get column order
             
         Returns:
-            Flattened parameter dictionary for SQL execution
+            Flattened list of parameter values for SQL execution
         """
-        params = {}
+        params = []
+        all_columns = [col.name for col in model_class.__table__.columns]
         
-        for i, record in enumerate(data_batch):
-            for col, value in record.items():
+        for record in data_batch:
+            for col in all_columns:
+                value = record.get(col)
                 # Handle datetime serialization
                 if isinstance(value, str) and 'T' in value:
                     try:
@@ -160,7 +155,7 @@ class PostgresLoader(LoggerMixin):
                     except ValueError:
                         pass  # Keep as string if not valid datetime
                 
-                params[f"{col}_{i}"] = value
+                params.append(value)
         
         return params
     
@@ -281,27 +276,31 @@ class PostgresLoader(LoggerMixin):
             # Process in batches
             total_processed = 0
             
-            async with self.async_session_factory() as session:
-                # Split data into batches
-                for i in range(0, len(data), self.max_batch_size):
-                    batch = data[i:i + self.max_batch_size]
-                    
-                    if upsert:
-                        # Use raw SQL UPSERT for better performance
-                        upsert_sql = self._build_upsert_statement(model_class, batch)
-                        params = self._prepare_batch_parameters(batch)
-                        
-                        result = await session.execute(text(upsert_sql), params)
-                        total_processed += len(batch)
-                        
-                    else:
-                        # Use ORM bulk insert
-                        objects = [model_class(**record) for record in batch]
-                        session.add_all(objects)
-                        total_processed += len(objects)
+            # Split data into batches
+            for i in range(0, len(data), self.max_batch_size):
+                batch = data[i:i + self.max_batch_size]
                 
-                # Commit all changes
-                await session.commit()
+                if upsert:
+                    # Use raw SQL UPSERT for better performance
+                    upsert_sql = self._build_upsert_statement(model_class, batch)
+                    params = self._prepare_batch_parameters(batch, model_class)
+                    
+                    await self.pg_service.execute(upsert_sql, *params)
+                    total_processed += len(batch)
+                    
+                else:
+                    # For INSERT only, we'll need to construct a multi-row insert statement
+                    # or use execute for each row, which is less efficient.
+                    # For now, assuming UPSERT is the primary path.
+                    # If pure INSERT is critical, a separate method for batch insert
+                    # using asyncpg's copy_records_to_table or similar would be ideal.
+                    self.logger.warning("Pure INSERT without UPSERT is not optimized yet. Using execute for each record.")
+                    for record in batch:
+                        columns = ", ".join(record.keys())
+                        placeholders = ", ".join([f"${i+1}" for i in range(len(record))])
+                        insert_sql = f"INSERT INTO {model_class.__tablename__} ({columns}) VALUES ({placeholders})"
+                        await self.pg_service.execute(insert_sql, *record.values())
+                        total_processed += 1
             
             duration = time.time() - start_time
             
@@ -448,10 +447,8 @@ class PostgresLoader(LoggerMixin):
             # Get model class
             model_class = self._get_model_class(table_name)
             
-            async with self.async_session_factory() as session:
-                # Truncate table
-                await session.execute(text(f"TRUNCATE TABLE {model_class.__tablename__}"))
-                await session.commit()
+            # Truncate table
+            await self.pg_service.execute(f"TRUNCATE TABLE {model_class.__tablename__}")
                 
             self.logger.info(f"Truncated table: {table_name}")
             
@@ -489,32 +486,29 @@ class PostgresLoader(LoggerMixin):
         try:
             model_class = self._get_model_class(table_name)
             
-            async with self.async_session_factory() as session:
-                # Basic row count
-                count_result = await session.execute(
-                    text(f"SELECT COUNT(*) FROM {model_class.__tablename__}")
-                )
-                row_count = count_result.scalar()
-                
-                # Table size
-                size_result = await session.execute(
-                    text(f"""
-                    SELECT pg_size_pretty(pg_total_relation_size('{model_class.__tablename__}')) as table_size
-                    """)
-                )
-                table_size = size_result.scalar()
-                
-                # Column count from model
-                column_count = len(model_class.__table__.columns)
-                
-                return {
-                    "table_name": table_name,
-                    "row_count": row_count,
-                    "table_size": table_size,
-                    "column_count": column_count,
-                    "primary_key": self._get_primary_key_columns(model_class),
-                    "model_class": model_class.__name__
-                }
+            # Basic row count
+            row_count = await self.pg_service.fetchval(
+                f"SELECT COUNT(*) FROM {model_class.__tablename__}"
+            )
+            
+            # Table size
+            table_size = await self.pg_service.fetchval(
+                f"""
+                SELECT pg_size_pretty(pg_total_relation_size('{model_class.__tablename__}')) as table_size
+                """
+            )
+            
+            # Column count from model
+            column_count = len(model_class.__table__.columns)
+            
+            return {
+                "table_name": table_name,
+                "row_count": row_count,
+                "table_size": table_size,
+                "column_count": column_count,
+                "primary_key": self._get_primary_key_columns(model_class),
+                "model_class": model_class.__name__
+            }
                 
         except Exception as e:
             return {
@@ -527,38 +521,37 @@ class PostgresLoader(LoggerMixin):
         try:
             model_class = self._get_model_class(table_name)
             
-            async with self.async_session_factory() as session:
-                # Get actual table schema from database
-                schema_result = await session.execute(
-                    text("""
-                    SELECT column_name, data_type, is_nullable
-                    FROM information_schema.columns 
-                    WHERE table_name = :table_name
-                    ORDER BY ordinal_position
-                    """),
-                    {"table_name": model_class.__tablename__}
-                )
-                
-                db_columns = {row[0]: {"type": row[1], "nullable": row[2] == "YES"} 
-                             for row in schema_result.fetchall()}
-                
-                # Get model columns
-                model_columns = {col.name: {"type": str(col.type), "nullable": col.nullable} 
-                               for col in model_class.__table__.columns}
-                
-                # Compare schemas
-                missing_in_db = set(model_columns.keys()) - set(db_columns.keys())
-                missing_in_model = set(db_columns.keys()) - set(model_columns.keys())
-                
-                return {
-                    "table_name": table_name,
-                    "schema_valid": len(missing_in_db) == 0 and len(missing_in_model) == 0,
-                    "db_columns": len(db_columns),
-                    "model_columns": len(model_columns),
-                    "missing_in_db": list(missing_in_db),
-                    "missing_in_model": list(missing_in_model),
-                    "status": "valid" if len(missing_in_db) == 0 and len(missing_in_model) == 0 else "invalid"
-                }
+            # Get actual table schema from database
+            schema_rows = await self.pg_service.fetch(
+                """
+                SELECT column_name, data_type, is_nullable
+                FROM information_schema.columns 
+                WHERE table_name = $1
+                ORDER BY ordinal_position
+                """,
+                model_class.__tablename__
+            )
+            
+            db_columns = {row["column_name"]: {"type": row["data_type"], "nullable": row["is_nullable"] == "YES"} 
+                         for row in schema_rows}
+            
+            # Get model columns
+            model_columns = {col.name: {"type": str(col.type), "nullable": col.nullable} 
+                           for col in model_class.__table__.columns}
+            
+            # Compare schemas
+            missing_in_db = set(model_columns.keys()) - set(db_columns.keys())
+            missing_in_model = set(db_columns.keys()) - set(model_columns.keys())
+            
+            return {
+                "table_name": table_name,
+                "schema_valid": len(missing_in_db) == 0 and len(missing_in_model) == 0,
+                "db_columns": len(db_columns),
+                "model_columns": len(model_columns),
+                "missing_in_db": list(missing_in_db),
+                "missing_in_model": list(missing_in_model),
+                "status": "valid" if len(missing_in_db) == 0 and len(missing_in_model) == 0 else "invalid"
+            }
                 
         except Exception as e:
             return {

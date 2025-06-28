@@ -68,6 +68,16 @@ class Settings(BaseSettings):
     SECRET_KEY: str = Field(default="dev-secret-key-change-in-production")
     API_KEY: Optional[str] = Field(default=None)
     CORS_ORIGINS: List[str] = Field(default=["*"])
+
+    @validator('CORS_ORIGINS', pre=True)
+    def parse_cors_origins(cls, v) -> List[str]:
+        """Parse CORS origins from string or list"""
+        if isinstance(v, str):
+            if not v:  # Handle empty string case
+                return []
+            return [origin.strip() for origin in v.split(",")]
+        return v
+    
     
     # Monitoring
     PROMETHEUS_ENABLED: bool = Field(default=True)
@@ -110,12 +120,7 @@ class Settings(BaseSettings):
             f"{values.get('REDIS_DB')}"
         )
     
-    @validator('CORS_ORIGINS', pre=True)
-    def parse_cors_origins(cls, v) -> List[str]:
-        """Parse CORS origins from string or list"""
-        if isinstance(v, str):
-            return [origin.strip() for origin in v.split(",")]
-        return v
+    
     
     @validator('DATA_SOURCE_TYPE', pre=True)
     def validate_data_source_type(cls, v: str) -> str:
