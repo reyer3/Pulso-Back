@@ -4,7 +4,7 @@ Daily KPI tracking and evolution charts for React frontend
 """
 
 from datetime import date, datetime, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
 
@@ -12,11 +12,13 @@ from app.core.dependencies import get_dashboard_service, get_cache_service
 from app.core.logging import LoggerMixin
 from app.models.evolution import (
     EvolutionRequest,
-    EvolutionResponse,
+    EvolutionData,        # ✅ Array directo List[EvolutionMetric]
     EvolutionDataPoint,
     EvolutionMetric,
-    EvolutionSeries
+    EvolutionSeries,
+    EvolutionFilters
 )
+from app.models.base import success_response, error_response
 from app.services.dashboard_service_v2 import DashboardServiceV2
 from app.services.cache_service import CacheService
 
@@ -37,7 +39,7 @@ class EvolutionController(LoggerMixin):
         fecha_inicio: Optional[date] = None,
         fecha_fin: Optional[date] = None,
         metrics: List[str] = None
-    ) -> EvolutionResponse:
+    ) -> EvolutionData:  # ✅ Devuelve array directo
         """
         Generate evolution data for daily KPI tracking
         
@@ -49,7 +51,7 @@ class EvolutionController(LoggerMixin):
             metrics: List of metrics to track
             
         Returns:
-            Evolution data with daily snapshots
+            EvolutionData - Direct array of EvolutionMetric (no wrapper)
         """
         # Default date range: last 30 days
         if fecha_fin is None:
@@ -80,7 +82,8 @@ class EvolutionController(LoggerMixin):
             
             if cached_data:
                 self.logger.info(f"Returning cached evolution data for key: {cache_key}")
-                return EvolutionResponse.parse_obj(cached_data)
+                # Cached data is already EvolutionData format
+                return [EvolutionMetric.parse_obj(item) for item in cached_data]
             
             # Generate evolution data using dashboard service
             evolution_data = await self.dashboard_service.get_evolution_data(
@@ -89,21 +92,21 @@ class EvolutionController(LoggerMixin):
                 fecha_fin=fecha_fin
             )
             
-            # Transform to frontend format
+            # Transform to frontend format (direct array)
             response_data = self._transform_evolution_data(
                 evolution_data, 
                 metrics
             )
             
-            # Cache for 1 hour
+            # Cache for 1 hour (serialize the array)
             await self.cache_service.set(
                 cache_key, 
-                response_data.dict(), 
+                [metric.dict() for metric in response_data], 
                 expire_in=3600
             )
             
             self.logger.info(
-                f"Generated evolution data with {len(response_data.data)} metrics "
+                f"Generated evolution data with {len(response_data)} metrics "
                 f"across {len(evolution_data.get('evolutionData', []))} days"
             )
             
@@ -118,9 +121,9 @@ class EvolutionController(LoggerMixin):
     
     def _transform_evolution_data(
         self, 
-        raw_evolution: Dict[str, Any], 
+        raw_evolution: Dict, 
         requested_metrics: List[str]
-    ) -> EvolutionResponse:
+    ) -> EvolutionData:  # ✅ Devuelve array directo
         """
         Transform dashboard evolution data to frontend format
         
@@ -129,17 +132,13 @@ class EvolutionController(LoggerMixin):
             requested_metrics: Metrics to include in response
             
         Returns:
-            Formatted evolution response
+            EvolutionData - Direct array of EvolutionMetric (no wrapper)
         """
         evolution_points = raw_evolution.get('evolutionData', [])
         
         if not evolution_points:
-            return EvolutionResponse(
-                data=[],
-                metadata=raw_evolution.get('metadata', {}),
-                success=True,
-                message="No data available for the specified date range"
-            )
+            self.logger.warning("No evolution data available for the specified date range")
+            return []  # ✅ Array vacío en lugar de wrapper
         
         # Group by cartera if multiple carteras in data
         cartera_groups = self._group_by_cartera(evolution_points)
@@ -148,41 +147,23 @@ class EvolutionController(LoggerMixin):
         metrics_data = []
         
         for metric in requested_metrics:
+            # Determine value type based on metric
             if metric == 'recupero':
-                # Special handling for recupero (currency)
-                metric_data = EvolutionMetric(
-                    metric=metric,
-                    valueType='currency',
-                    series=self._create_metric_series(cartera_groups, metric)
-                )
+                value_type = 'currency'
             elif metric in ['cobertura', 'contacto', 'cd', 'ci', 'cierre']:
-                # Percentage metrics
-                metric_data = EvolutionMetric(
-                    metric=metric,
-                    valueType='percent',
-                    series=self._create_metric_series(cartera_groups, metric)
-                )
+                value_type = 'percent'
             else:
-                # Number metrics
-                metric_data = EvolutionMetric(
-                    metric=metric,
-                    valueType='number',
-                    series=self._create_metric_series(cartera_groups, metric)
-                )
+                value_type = 'number'
+            
+            metric_data = EvolutionMetric(
+                metric=metric,
+                valueType=value_type,
+                series=self._create_metric_series(cartera_groups, metric)
+            )
             
             metrics_data.append(metric_data)
         
-        return EvolutionResponse(
-            data=metrics_data,
-            metadata={
-                **raw_evolution.get('metadata', {}),
-                'requestedMetrics': requested_metrics,
-                'totalDays': len(evolution_points),
-                'carteras': list(cartera_groups.keys())
-            },
-            success=True,
-            message=f"Evolution data generated for {len(evolution_points)} days"
-        )
+        return metrics_data  # ✅ Array directo, sin wrapper
     
     def _group_by_cartera(self, evolution_points: List[Dict]) -> Dict[str, List[Dict]]:
         """
@@ -244,7 +225,7 @@ class EvolutionController(LoggerMixin):
 # FASTAPI ENDPOINTS
 # =============================================================================
 
-@router.get("/", response_model=EvolutionResponse)
+@router.get("/", response_model=EvolutionData)  # ✅ Array directo
 async def get_evolution_data(
     cartera: Optional[str] = Query(None, description="Filter by cartera type"),
     servicio: Optional[str] = Query(None, description="Filter by service type (MOVIL/FIJA)"),
@@ -256,9 +237,12 @@ async def get_evolution_data(
     ),
     dashboard_service: DashboardServiceV2 = Depends(get_dashboard_service),
     cache_service: CacheService = Depends(get_cache_service)
-):
+) -> EvolutionData:  # ✅ Array directo
     """
     Get evolution data for daily KPI tracking
+    
+    Returns EvolutionData - DIRECT array as Frontend expects.
+    No wrapper object, no extra metadata field.
     
     **Usage Examples:**
     
@@ -291,6 +275,36 @@ async def get_evolution_data(
     )
 
 
+@router.post("/", response_model=EvolutionData)  # ✅ Array directo
+async def get_evolution_data_post(
+    request: EvolutionRequest,
+    dashboard_service: DashboardServiceV2 = Depends(get_dashboard_service),
+    cache_service: CacheService = Depends(get_cache_service)
+) -> EvolutionData:
+    """
+    Get evolution data with POST method for complex filters
+    
+    Returns EvolutionData directly - EXACT match with Frontend expectations.
+    """
+    controller = EvolutionController(dashboard_service, cache_service)
+    
+    # Parse dates from request
+    fecha_inicio = datetime.strptime(request.fechaInicio, '%Y-%m-%d').date()
+    fecha_fin = datetime.strptime(request.fechaFin, '%Y-%m-%d').date()
+    
+    # Extract filters
+    cartera = request.filters.get('cartera', [None])[0] if request.filters.get('cartera') else None
+    servicio = request.filters.get('servicio', [None])[0] if request.filters.get('servicio') else None
+    
+    return await controller.get_evolution_data(
+        cartera=cartera,
+        servicio=servicio,
+        fecha_inicio=fecha_inicio,
+        fecha_fin=fecha_fin,
+        metrics=request.includeMetrics
+    )
+
+
 @router.get("/carteras", response_model=List[str])
 async def get_available_carteras(
     dashboard_service: DashboardServiceV2 = Depends(get_dashboard_service)
@@ -319,14 +333,14 @@ async def get_available_carteras(
         )
 
 
-@router.get("/metrics", response_model=List[Dict[str, str]])
+@router.get("/metrics")
 async def get_available_metrics():
     """
     Get list of available metrics for evolution tracking
     
     Returns list of metrics with their descriptions and value types
     """
-    metrics = [
+    metrics_info = [
         {"metric": "cobertura", "description": "Coverage percentage", "valueType": "percent"},
         {"metric": "contacto", "description": "Contact percentage", "valueType": "percent"},
         {"metric": "cd", "description": "Direct contact percentage", "valueType": "percent"},
@@ -337,7 +351,7 @@ async def get_available_metrics():
         {"metric": "intensidad", "description": "Intensity (attempts per account)", "valueType": "number"},
     ]
     
-    return metrics
+    return success_response(data=metrics_info)
 
 
 @router.get("/health")
@@ -350,20 +364,24 @@ async def evolution_health_check(
     try:
         health_status = await dashboard_service.health_check()
         
-        return {
-            "status": "healthy",
-            "service": "evolution",
-            "timestamp": datetime.now().isoformat(),
-            "dashboard_service": health_status
-        }
+        return success_response(
+            data={
+                "status": "healthy",
+                "service": "evolution",
+                "timestamp": datetime.now().isoformat(),
+                "dashboard_service": health_status
+            }
+        )
         
     except Exception as e:
         return JSONResponse(
             status_code=503,
-            content={
-                "status": "unhealthy", 
-                "service": "evolution",
-                "error": str(e),
-                "timestamp": datetime.now().isoformat()
-            }
+            content=error_response(
+                message="Evolution service unhealthy",
+                details={
+                    "service": "evolution",
+                    "error": str(e),
+                    "timestamp": datetime.now().isoformat()
+                }
+            )
         )
