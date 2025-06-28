@@ -7,8 +7,9 @@ fastapi>=0.115.14
 uvicorn[standard]>=0.24.0
 python-multipart>=0.0.19
 
-# Database & Cache (ASYNCPG PURE)
+# Database & Cache (ASYNCPG PURE + psycopg2 for migrations only)
 asyncpg>=0.30.0
+psycopg2-binary>=2.9.9  # Required by yoyo-migrations for PostgreSQL
 yoyo-migrations>=8.2.0
 redis>=5.0.1
 
