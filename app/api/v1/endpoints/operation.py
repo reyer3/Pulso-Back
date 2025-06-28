@@ -11,14 +11,16 @@ from fastapi.responses import JSONResponse
 from app.core.dependencies import get_dashboard_service, get_cache_service
 from app.core.logging import LoggerMixin
 from app.models.operation import (
-    OperationAnalysisRequest,
-    OperationAnalysisResponse,
+    OperationDayRequest,           # ✅ CORRECTO
+    OperationDayAnalysisData,      # ✅ CORRECTO
+    OperationDayAnalysisResponse,  # ✅ CORRECTO
     OperationDayKPI,
     ChannelMetric,
     HourlyPerformance,
     AttemptEffectiveness,
     QueuePerformance
 )
+from app.models.base import success_response, error_response
 from app.services.dashboard_service_v2 import DashboardServiceV2
 from app.services.cache_service import CacheService
 
@@ -38,7 +40,7 @@ class OperationController(LoggerMixin):
         include_hourly: bool = True,
         include_attempts: bool = True,
         include_queues: bool = True
-    ) -> OperationAnalysisResponse:
+    ) -> OperationDayAnalysisData:  # ✅ CORRECTO: Devuelve datos directos
         """
         Generate daily operation analysis for call center performance
         
@@ -49,7 +51,7 @@ class OperationController(LoggerMixin):
             include_queues: Include queue performance metrics
             
         Returns:
-            Complete operation analysis for the specified date
+            OperationDayAnalysisData - Direct data as Frontend expects
         """
         if fecha_analisis is None:
             fecha_analisis = date.today()
@@ -63,7 +65,7 @@ class OperationController(LoggerMixin):
             
             if cached_data:
                 self.logger.info(f"Returning cached operation data for key: {cache_key}")
-                return OperationAnalysisResponse.parse_obj(cached_data)
+                return OperationDayAnalysisData.parse_obj(cached_data)
             
             # Get dashboard data for the analysis date
             dashboard_data = await self.dashboard_service.get_dashboard_data(
@@ -72,7 +74,7 @@ class OperationController(LoggerMixin):
             )
             
             # Generate operation analysis components
-            analysis_response = await self._generate_operation_analysis(
+            analysis_data = await self._generate_operation_analysis(
                 dashboard_data=dashboard_data,
                 fecha_analisis=fecha_analisis,
                 include_hourly=include_hourly,
@@ -83,17 +85,17 @@ class OperationController(LoggerMixin):
             # Cache for 30 minutes (operation data is more volatile)
             await self.cache_service.set(
                 cache_key,
-                analysis_response.dict(),
+                analysis_data.dict(),
                 expire_in=1800
             )
             
             self.logger.info(
                 f"Generated operation analysis for {fecha_analisis} with "
-                f"{len(analysis_response.kpis)} KPIs and "
-                f"{len(analysis_response.channelPerformance)} channels"
+                f"{len(analysis_data.kpis)} KPIs and "
+                f"{len(analysis_data.channelPerformance)} channels"
             )
             
-            return analysis_response
+            return analysis_data
             
         except Exception as e:
             self.logger.error(f"Error generating operation analysis: {str(e)}")
@@ -109,7 +111,7 @@ class OperationController(LoggerMixin):
         include_hourly: bool,
         include_attempts: bool,
         include_queues: bool
-    ) -> OperationAnalysisResponse:
+    ) -> OperationDayAnalysisData:  # ✅ CORRECTO
         """
         Generate complete operation analysis from dashboard data
         
@@ -121,7 +123,7 @@ class OperationController(LoggerMixin):
             include_queues: Whether to include queue performance
             
         Returns:
-            Complete operation analysis response
+            OperationDayAnalysisData - Direct data object
         """
         # Calculate daily KPIs
         kpis = self._calculate_daily_kpis(dashboard_data)
@@ -142,22 +144,12 @@ class OperationController(LoggerMixin):
         if include_queues:
             queue_performance = self._generate_queue_performance(dashboard_data)
         
-        return OperationAnalysisResponse(
+        return OperationDayAnalysisData(
             kpis=kpis,
             channelPerformance=channel_performance,
             hourlyPerformance=hourly_performance,
             attemptEffectiveness=attempt_effectiveness,
-            queuePerformance=queue_performance,
-            metadata={
-                "fechaAnalisis": fecha_analisis.isoformat(),
-                "totalRegistros": dashboard_data.get('metadata', {}).get('totalRecords', 0),
-                "includeHourly": include_hourly,
-                "includeAttempts": include_attempts,
-                "includeQueues": include_queues,
-                "lastRefresh": datetime.now().isoformat()
-            },
-            success=True,
-            message=f"Operation analysis generated for {fecha_analisis}"
+            queuePerformance=queue_performance
         )
     
     def _calculate_daily_kpis(self, dashboard_data: Dict[str, Any]) -> List[OperationDayKPI]:
@@ -443,7 +435,7 @@ class OperationController(LoggerMixin):
 # FASTAPI ENDPOINTS
 # =============================================================================
 
-@router.get("/", response_model=OperationAnalysisResponse)
+@router.get("/", response_model=OperationDayAnalysisData)  # ✅ CORRECTO
 async def get_operation_analysis(
     fecha_analisis: Optional[date] = Query(None, description="Analysis date (YYYY-MM-DD)"),
     include_hourly: bool = Query(True, description="Include hourly performance breakdown"),
@@ -451,9 +443,12 @@ async def get_operation_analysis(
     include_queues: bool = Query(True, description="Include queue performance metrics"),
     dashboard_service: DashboardServiceV2 = Depends(get_dashboard_service),
     cache_service: CacheService = Depends(get_cache_service)
-):
+) -> OperationDayAnalysisData:  # ✅ CORRECTO
     """
     Get daily operation analysis for call center performance monitoring
+    
+    Returns OperationDayAnalysisData - DIRECT data as Frontend expects.
+    No wrapper object, no extra metadata field.
     
     **Usage Examples:**
     
@@ -475,6 +470,30 @@ async def get_operation_analysis(
         include_hourly=include_hourly,
         include_attempts=include_attempts,
         include_queues=include_queues
+    )
+
+
+@router.post("/", response_model=OperationDayAnalysisData)  # ✅ NUEVO
+async def get_operation_analysis_post(
+    request: OperationDayRequest,
+    dashboard_service: DashboardServiceV2 = Depends(get_dashboard_service),
+    cache_service: CacheService = Depends(get_cache_service)
+) -> OperationDayAnalysisData:
+    """
+    Get operation analysis with POST method for complex requests
+    
+    Returns OperationDayAnalysisData directly - EXACT match with Frontend expectations.
+    """
+    controller = OperationController(dashboard_service, cache_service)
+    
+    # Parse date from request
+    fecha_analisis = datetime.strptime(request.date, '%Y-%m-%d').date()
+    
+    return await controller.get_operation_analysis(
+        fecha_analisis=fecha_analisis,
+        include_hourly=request.includeHourlyBreakdown,
+        include_attempts=request.includeAttemptAnalysis,
+        include_queues=request.includeQueueDetails
     )
 
 
@@ -550,20 +569,24 @@ async def operation_health_check(
     try:
         health_status = await dashboard_service.health_check()
         
-        return {
-            "status": "healthy",
-            "service": "operation",
-            "timestamp": datetime.now().isoformat(),
-            "dashboard_service": health_status
-        }
+        return success_response(
+            data={
+                "status": "healthy",
+                "service": "operation",
+                "timestamp": datetime.now().isoformat(),
+                "dashboard_service": health_status
+            }
+        )
         
     except Exception as e:
         return JSONResponse(
             status_code=503,
-            content={
-                "status": "unhealthy",
-                "service": "operation",
-                "error": str(e),
-                "timestamp": datetime.now().isoformat()
-            }
+            content=error_response(
+                message="Operation service unhealthy",
+                details={
+                    "service": "operation",
+                    "error": str(e),
+                    "timestamp": datetime.now().isoformat()
+                }
+            )
         )
