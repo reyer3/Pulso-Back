@@ -128,4 +128,37 @@ pytest --cov=app
 ```
 
 ---
-**Creado por Ricky para Telefónica Cobranzas**
+**Creado por Ricardo Reyes para Onbotgo**
+
+#!/usr/bin/env bash
+set -euo pipefail
+
+PROJECT="BI_USA"
+LOCATION="us-east1"
+
+TABLES=(
+  "voicebot_P3fV4dWNeMkN5RJMhV8e"
+  "batch_P3fV4dWNeMkN5RJMhV8e_pagos"
+  "batch_P3fV4dWNeMkN5RJMhV8e_tran_deuda"
+  "mibotair_P3fV4dWNeMkN5RJMhV8e"
+  "bi_P3fV4dWNeMkN5RJMhV8e_dash_calendario_v5"
+)
+
+echo "🚀 EDA simple  • Proyecto: $PROJECT  • Región: $LOCATION"
+for t in "${TABLES[@]}"; do
+  FULL="$PROJECT.$t"
+  echo "=================================================="
+  echo "🔹 Tabla: $FULL"
+
+  echo "📌 Esquema bruto:"
+  bq --location="$LOCATION" show --format=prettyjson "$FULL"
+
+  echo -e "\n📌 Total de filas:"
+  bq --location="$LOCATION" query --quiet --nouse_legacy_sql --format=json \
+    "SELECT COUNT(*) AS total FROM \`$FULL\`"
+
+  echo -e "\n📌 Muestra (5 filas):"
+  bq --location="$LOCATION" head --max_rows=5 "$FULL"
+  echo
+done
+echo "✅ Terminado."
