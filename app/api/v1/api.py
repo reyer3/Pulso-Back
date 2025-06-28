@@ -10,6 +10,7 @@ from app.api.v1.endpoints.evolution import router as evolution_router
 from app.api.v1.endpoints.assignment import router as assignment_router
 from app.api.v1.endpoints.operation import router as operation_router
 from app.api.v1.endpoints.productivity import router as productivity_router
+from app.api.v1.endpoints.etl import router as etl_router
 
 # Create main API router
 api_router = APIRouter()
@@ -20,6 +21,7 @@ api_router.include_router(evolution_router, tags=["evolution"])
 api_router.include_router(assignment_router, tags=["assignment"])
 api_router.include_router(operation_router, tags=["operation"])
 api_router.include_router(productivity_router, tags=["productivity"])
+api_router.include_router(etl_router, tags=["etl"])
 
 # Add health check endpoint at API level
 @api_router.get("/health")
@@ -35,13 +37,15 @@ async def api_health():
             "evolution": "/evolution - Evolutivos diarios y trending de KPIs", 
             "assignment": "/assignment - Análisis de composición de cartera",
             "operation": "/operation - Análisis operativo diario del call center",
-            "productivity": "/productivity - Análisis de productividad de agentes"
+            "productivity": "/productivity - Análisis de productividad de agentes",
+            "etl": "/etl - Sistema de extracción incremental de datos"
         },
         "features": {
             "database_agnostic": "Preparado para migración BigQuery → PostgreSQL",
+            "incremental_etl": "Extracciones incrementales automáticas",
             "caching": "Redis cache integrado para performance",
             "filtering": "Filtros por cartera, servicio, fechas",
-            "real_time": "Datos con refresh 4-5 veces por día",
+            "real_time": "Datos con refresh bajo demanda",
             "agent_tracking": "Monitoreo de productividad por agente"
         },
         "openapi_docs": "/docs"
@@ -58,10 +62,11 @@ async def api_info():
         "version": "1.0.0",
         "description": "API + ETL Backend para Dashboard Cobranzas Telefónica",
         "architecture": {
-            "pattern": "API-First with Repository Pattern",
-            "database": "BigQuery (migrating to PostgreSQL)",
+            "pattern": "API-First with Repository Pattern + Incremental ETL",
+            "database": "BigQuery → PostgreSQL (incremental migration)",
             "cache": "Redis",
-            "processing": "Python pandas + numpy"
+            "processing": "Python pandas + numpy",
+            "etl": "Production-ready incremental extraction system"
         },
         "endpoints": {
             "/api/v1/dashboard": {
@@ -88,6 +93,11 @@ async def api_info():
                 "description": "Análisis de productividad de agentes y performance",
                 "methods": ["GET", "POST"],
                 "features": ["agent_ranking", "daily_trends", "hourly_patterns", "performance_heatmap"]
+            },
+            "/api/v1/etl": {
+                "description": "Sistema de extracción incremental de datos",
+                "methods": ["GET", "POST"],
+                "features": ["dashboard_refresh", "table_monitoring", "watermark_tracking", "background_processing"]
             }
         },
         "data_sources": {
@@ -97,13 +107,21 @@ async def api_info():
             "gestiones_humano": "Gestiones manuales del call center",
             "pagos": "Transacciones de recupero y pagos"
         },
-        "refresh_schedule": "4-5 veces por día (automatizado)",
+        "etl_capabilities": {
+            "extraction_modes": ["incremental", "full_refresh", "sliding_window"],
+            "supported_tables": ["dashboard_data", "evolution_data", "assignment_data", "operation_data", "productivity_data"],
+            "monitoring": "Comprehensive watermark tracking and status monitoring",
+            "recovery": "Automatic cleanup and recovery from failed extractions",
+            "concurrency": "Configurable concurrent processing limits"
+        },
+        "refresh_schedule": "On-demand via API trigger (incremental)",
         "target_users": "Equipo de cobranzas Telefónica",
         "frontend": "React TypeScript dashboard (Pulso-Dash)",
         "integration": {
-            "status": "Fully integrated with Pulso-Dash frontend",
+            "status": "Fully integrated with Pulso-Dash frontend + ETL system",
             "authentication": "Optional API key support",
             "cors": "Configured for cross-origin requests",
-            "documentation": "OpenAPI/Swagger at /docs"
+            "documentation": "OpenAPI/Swagger at /docs",
+            "etl_triggering": "HTTP endpoints for triggering data refreshes"
         }
     }
