@@ -2,6 +2,7 @@
 0 */3 * * * cd /app && python etl/etl_main.py --pipeline dashboard
 30 */6 * * * cd /app && python etl/etl_main.py --pipeline evolution
 0 9 * * * cd /app && python etl/etl_main.py --pipeline assignment
+0 */6 * * * cd /app && python etl/etl_main.py --pipeline bigquery_dashboard
 
 # Cleanup logs weekly
 0 2 * * 0 find /app/logs -name "*.log" -mtime +7 -delete
