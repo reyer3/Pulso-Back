@@ -12,6 +12,7 @@ from app.repositories.data_adapters import DataSourceFactory, DataSourceAdapter
 from app.repositories.cache_repo import CacheRepository
 from app.repositories.bigquery_repo import BigQueryRepository
 from app.repositories.postgres_repo import PostgresRepository
+from app.repositories.repository_factory import get_data_repository
 from app.services.postgres_service import PostgresService
 from app.services.dashboard_service_v2 import DashboardServiceV2
 from app.services.cache_service import CacheService
@@ -67,6 +68,9 @@ def get_dashboard_service(
 ) -> DashboardServiceV2:
     """Servicio de dashboard desacoplado de la BD."""
     return DashboardServiceV2(data_adapter)
+
+def get_data_repo():
+    return get_data_repository()
 
 # -------------------------------------------------------------------
 # Aliases y anotaciones para tipado limpio en endpoints
