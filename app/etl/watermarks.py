@@ -1,21 +1,18 @@
 """
-🎯 Watermark System for Incremental Extractions
-Production-ready tracking of extraction state
+🎯 Watermark System for Incremental Extractions - asyncpg Pure
+Production-ready tracking of extraction state without SQLAlchemy overhead
 
 Manages watermarks (last extraction timestamps) for each table,
 ensuring reliable incremental processing and recovery from failures.
 """
 
 from datetime import datetime, timezone
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 import json
-import asyncio
-from dataclasses import dataclass, asdict
 import logging
+from dataclasses import dataclass
 
-from app.core.database import get_postgres_engine
-from sqlalchemy.ext.asyncio import AsyncEngine
-from sqlalchemy import text
+from app.core.database import get_database_manager, execute_query, DatabaseManager
 
 
 @dataclass
@@ -34,21 +31,36 @@ class WatermarkInfo:
 
 class WatermarkManager:
     """
-    Manages extraction watermarks for incremental ETL
+    Manages extraction watermarks for incremental ETL - asyncpg Pure
     
     Features:
-    - Persistent storage in PostgreSQL
+    - Pure asyncpg for maximum performance
     - Atomic watermark updates
     - Recovery from failed extractions
     - Extraction metadata tracking
     """
     
-    def __init__(self, engine: Optional[AsyncEngine] = None):
-        self.engine = engine or get_postgres_engine()
+    def __init__(self, db_manager: Optional[DatabaseManager] = None):
+        self.db_manager = db_manager
         self.logger = logging.getLogger(__name__)
+    
+    async def get_db(self) -> DatabaseManager:
+        """Get database manager instance"""
+        if self.db_manager is None:
+            self.db_manager = await get_database_manager()
+        return self.db_manager
     
     async def ensure_watermark_table(self) -> None:
         """Create watermark table if it doesn't exist"""
+        # Check if table exists first
+        db = await self.get_db()
+        table_exists = await db.table_exists("etl_watermarks")
+        
+        if table_exists:
+            self.logger.info("✅ Watermark table already exists")
+            return
+        
+        # Create table with all constraints and indexes
         create_table_sql = """
         CREATE TABLE IF NOT EXISTS etl_watermarks (
             id SERIAL PRIMARY KEY,
@@ -64,7 +76,6 @@ class WatermarkManager:
             updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
         );
         
-        -- Create indexes for performance
         CREATE INDEX IF NOT EXISTS idx_etl_watermarks_table_name 
             ON etl_watermarks(table_name);
         CREATE INDEX IF NOT EXISTS idx_etl_watermarks_status 
@@ -73,10 +84,8 @@ class WatermarkManager:
             ON etl_watermarks(updated_at);
         """
         
-        async with self.engine.begin() as conn:
-            await conn.execute(text(create_table_sql))
-            
-        self.logger.info("Watermark table ensured")
+        await execute_query(create_table_sql)
+        self.logger.info("✅ Watermark table created with indexes")
     
     async def get_watermark(self, table_name: str) -> Optional[WatermarkInfo]:
         """Get current watermark for a table"""
@@ -92,16 +101,14 @@ class WatermarkManager:
             created_at,
             updated_at
         FROM etl_watermarks 
-        WHERE table_name = :table_name
+        WHERE table_name = $1
         """
         
-        async with self.engine.begin() as conn:
-            result = await conn.execute(text(query), {"table_name": table_name})
-            row = result.fetchone()
-            
-            if row:
-                return WatermarkInfo(**dict(row._mapping))
-            return None
+        row = await execute_query(query, table_name, fetch="one")
+        
+        if row:
+            return WatermarkInfo(**dict(row))
+        return None
     
     async def get_last_extraction_time(self, table_name: str) -> Optional[datetime]:
         """Get just the last extraction timestamp for a table"""
@@ -118,27 +125,23 @@ class WatermarkManager:
             extraction_id,
             updated_at
         ) VALUES (
-            :table_name, 
-            :timestamp, 
-            'running',
-            :extraction_id,
-            CURRENT_TIMESTAMP
+            $1, $2, 'running', $3, CURRENT_TIMESTAMP
         )
         ON CONFLICT (table_name) 
         DO UPDATE SET 
             last_extraction_status = 'running',
-            extraction_id = :extraction_id,
+            extraction_id = $3,
             updated_at = CURRENT_TIMESTAMP
         """
         
-        async with self.engine.begin() as conn:
-            await conn.execute(text(upsert_sql), {
-                "table_name": table_name,
-                "timestamp": datetime.now(timezone.utc),
-                "extraction_id": extraction_id
-            })
+        await execute_query(
+            upsert_sql, 
+            table_name, 
+            datetime.now(timezone.utc), 
+            extraction_id
+        )
         
-        self.logger.info(f"Started extraction for {table_name} (ID: {extraction_id})")
+        self.logger.info(f"🏁 Started extraction for {table_name} (ID: {extraction_id})")
     
     async def update_watermark(
         self, 
@@ -166,45 +169,38 @@ class WatermarkManager:
             created_at,
             updated_at
         ) VALUES (
-            :table_name, 
-            :timestamp, 
-            :status,
-            :records_extracted,
-            :extraction_duration_seconds,
-            :error_message,
-            :extraction_id,
-            :metadata,
-            CURRENT_TIMESTAMP,
-            CURRENT_TIMESTAMP
+            $1, $2, $3, $4, $5, $6, $7, $8, 
+            CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
         )
         ON CONFLICT (table_name) 
         DO UPDATE SET 
-            last_extracted_at = :timestamp,
-            last_extraction_status = :status,
-            records_extracted = :records_extracted,
-            extraction_duration_seconds = :extraction_duration_seconds,
-            error_message = :error_message,
-            extraction_id = :extraction_id,
-            metadata = COALESCE(:metadata, etl_watermarks.metadata),
+            last_extracted_at = $2,
+            last_extraction_status = $3,
+            records_extracted = $4,
+            extraction_duration_seconds = $5,
+            error_message = $6,
+            extraction_id = $7,
+            metadata = COALESCE($8, etl_watermarks.metadata),
             updated_at = CURRENT_TIMESTAMP
         """
         
         metadata_json = json.dumps(metadata) if metadata else None
         
-        async with self.engine.begin() as conn:
-            await conn.execute(text(upsert_sql), {
-                "table_name": table_name,
-                "timestamp": timestamp,
-                "status": status,
-                "records_extracted": records_extracted,
-                "extraction_duration_seconds": extraction_duration_seconds,
-                "error_message": error_message,
-                "extraction_id": extraction_id,
-                "metadata": metadata_json
-            })
+        await execute_query(
+            upsert_sql,
+            table_name,
+            timestamp,
+            status,
+            records_extracted,
+            extraction_duration_seconds,
+            error_message,
+            extraction_id,
+            metadata_json
+        )
         
+        status_emoji = "✅" if status == "success" else "❌" if status == "failed" else "🔄"
         self.logger.info(
-            f"Updated watermark for {table_name}: {timestamp} "
+            f"{status_emoji} Updated watermark for {table_name}: {timestamp} "
             f"({records_extracted} records, {status})"
         )
     
@@ -226,11 +222,8 @@ class WatermarkManager:
         ORDER BY updated_at DESC
         """
         
-        async with self.engine.begin() as conn:
-            result = await conn.execute(text(query))
-            rows = result.fetchall()
-            
-            return [WatermarkInfo(**dict(row._mapping)) for row in rows]
+        rows = await execute_query(query, fetch="all")
+        return [WatermarkInfo(**dict(row)) for row in rows]
     
     async def get_running_extractions(self) -> List[WatermarkInfo]:
         """Get all extractions currently marked as running"""
@@ -250,11 +243,8 @@ class WatermarkManager:
         ORDER BY updated_at DESC
         """
         
-        async with self.engine.begin() as conn:
-            result = await conn.execute(text(query))
-            rows = result.fetchall()
-            
-            return [WatermarkInfo(**dict(row._mapping)) for row in rows]
+        rows = await execute_query(query, fetch="all")
+        return [WatermarkInfo(**dict(row)) for row in rows]
     
     async def cleanup_stale_extractions(self, timeout_minutes: int = 30) -> int:
         """
@@ -266,19 +256,26 @@ class WatermarkManager:
         UPDATE etl_watermarks 
         SET 
             last_extraction_status = 'failed',
-            error_message = 'Extraction timed out - marked as failed',
+            error_message = 'Extraction timed out - marked as failed by cleanup',
             updated_at = CURRENT_TIMESTAMP
         WHERE 
             last_extraction_status = 'running'
             AND updated_at < CURRENT_TIMESTAMP - INTERVAL '%s minutes'
+        RETURNING table_name
         """
         
-        async with self.engine.begin() as conn:
-            result = await conn.execute(text(cleanup_sql % timeout_minutes))
-            cleaned_count = result.rowcount
+        cleaned_tables = await execute_query(
+            cleanup_sql % timeout_minutes, 
+            fetch="all"
+        )
+        
+        cleaned_count = len(cleaned_tables)
         
         if cleaned_count > 0:
-            self.logger.warning(f"Cleaned up {cleaned_count} stale extractions")
+            table_names = [row['table_name'] for row in cleaned_tables]
+            self.logger.warning(
+                f"🧹 Cleaned up {cleaned_count} stale extractions: {table_names}"
+            )
         
         return cleaned_count
     
@@ -292,19 +289,21 @@ class WatermarkManager:
             error_message=f"Manually reset to {timestamp}"
         )
         
-        self.logger.warning(f"Reset watermark for {table_name} to {timestamp}")
+        self.logger.warning(f"🔄 Reset watermark for {table_name} to {timestamp}")
     
     async def delete_watermark(self, table_name: str) -> None:
         """Delete watermark for a table (careful!)"""
-        delete_sql = "DELETE FROM etl_watermarks WHERE table_name = :table_name"
+        delete_sql = "DELETE FROM etl_watermarks WHERE table_name = $1"
         
-        async with self.engine.begin() as conn:
-            result = await conn.execute(text(delete_sql), {"table_name": table_name})
-            
-        if result.rowcount > 0:
-            self.logger.warning(f"Deleted watermark for {table_name}")
+        result = await execute_query(delete_sql, table_name)
+        
+        # Extract row count from result string "DELETE n"
+        row_count = int(result.split()[-1]) if result.startswith("DELETE") else 0
+        
+        if row_count > 0:
+            self.logger.warning(f"🗑️ Deleted watermark for {table_name}")
         else:
-            self.logger.info(f"No watermark found for {table_name}")
+            self.logger.info(f"ℹ️ No watermark found for {table_name}")
     
     async def get_all_watermarks(self) -> List[WatermarkInfo]:
         """Get all watermarks for monitoring dashboard"""
@@ -323,11 +322,8 @@ class WatermarkManager:
         ORDER BY table_name
         """
         
-        async with self.engine.begin() as conn:
-            result = await conn.execute(text(query))
-            rows = result.fetchall()
-            
-            return [WatermarkInfo(**dict(row._mapping)) for row in rows]
+        rows = await execute_query(query, fetch="all")
+        return [WatermarkInfo(**dict(row)) for row in rows]
     
     async def get_extraction_summary(self) -> Dict[str, Any]:
         """Get summary statistics for monitoring"""
@@ -337,36 +333,35 @@ class WatermarkManager:
             COUNT(*) FILTER (WHERE last_extraction_status = 'success') as successful_tables,
             COUNT(*) FILTER (WHERE last_extraction_status = 'failed') as failed_tables,
             COUNT(*) FILTER (WHERE last_extraction_status = 'running') as running_tables,
-            SUM(records_extracted) as total_records_extracted,
-            AVG(extraction_duration_seconds) as avg_extraction_time,
+            COALESCE(SUM(records_extracted), 0) as total_records_extracted,
+            COALESCE(AVG(extraction_duration_seconds), 0) as avg_extraction_time,
             MAX(updated_at) as last_activity
         FROM etl_watermarks
         """
         
-        async with self.engine.begin() as conn:
-            result = await conn.execute(text(summary_sql))
-            row = result.fetchone()
-            
-            if row:
-                summary = dict(row._mapping)
-                # Convert decimals to float for JSON serialization
-                if summary.get('avg_extraction_time'):
-                    summary['avg_extraction_time'] = float(summary['avg_extraction_time'])
-                return summary
-            
-            return {
-                "total_tables": 0,
-                "successful_tables": 0, 
-                "failed_tables": 0,
-                "running_tables": 0,
-                "total_records_extracted": 0,
-                "avg_extraction_time": 0.0,
-                "last_activity": None
-            }
+        row = await execute_query(summary_sql, fetch="one")
+        
+        if row:
+            summary = dict(row)
+            # Convert to proper types for JSON serialization
+            summary['avg_extraction_time'] = float(summary['avg_extraction_time'])
+            summary['total_records_extracted'] = int(summary['total_records_extracted'])
+            return summary
+        
+        return {
+            "total_tables": 0,
+            "successful_tables": 0, 
+            "failed_tables": 0,
+            "running_tables": 0,
+            "total_records_extracted": 0,
+            "avg_extraction_time": 0.0,
+            "last_activity": None
+        }
 
 
 # 🎯 Global watermark manager instance
 _watermark_manager: Optional[WatermarkManager] = None
+
 
 async def get_watermark_manager() -> WatermarkManager:
     """Get singleton watermark manager instance"""
@@ -418,3 +413,24 @@ async def mark_extraction_failed(
         error_message=error_message,
         extraction_id=extraction_id
     )
+
+
+async def watermark_health_check() -> Dict[str, Any]:
+    """Health check for watermark system"""
+    try:
+        manager = await get_watermark_manager()
+        summary = await manager.get_extraction_summary()
+        
+        return {
+            "status": "healthy",
+            "watermark_system": "operational",
+            "total_tables_tracked": summary["total_tables"],
+            "last_activity": summary["last_activity"].isoformat() if summary["last_activity"] else None
+        }
+        
+    except Exception as e:
+        return {
+            "status": "unhealthy",
+            "error": str(e),
+            "watermark_system": "failed"
+        }
