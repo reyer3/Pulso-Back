@@ -14,7 +14,7 @@ from prometheus_client import start_http_server
 
 from app.api.v1.api import api_router
 from app.core.config import settings
-from app.core.database import init_db, close_db
+# from app.core.database import init_db, close_db  # ❌ REMOVIDO: Funciones no existen
 from app.core.cache import cache as redis_cache
 from app.core.logging import setup_logging
 from app.core.middleware import TimingMiddleware, PrometheusMiddleware, SecurityMiddleware
@@ -36,7 +36,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await redis_cache.init_redis()
     logger.info("Pool de conexiones de Redis inicializado.")
 
-    # Inicializar la base de datos (crear tablas si no existen)
+    # ❌ REMOVIDO: init_db ya no existe (refactorizado a asyncpg directo)
     # await init_db()  # Descomentar si necesitas crear tablas al inicio
     # logger.info("Base de datos inicializada.")
 
@@ -56,9 +56,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await redis_cache.close()
     logger.info("Conexiones de Redis cerradas.")
 
-    # Cerrar el pool de conexiones de la base de datos
-    await close_db()
-    logger.info("Conexiones de base de datos cerradas.")
+    # ❌ REMOVIDO: close_db ya no existe (refactorizado a asyncpg directo)
+    # await close_db()
+    # logger.info("Conexiones de base de datos cerradas.")
 
     logger.info("Parada de la API Pulso-Back completada.")
 
