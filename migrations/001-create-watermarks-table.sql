@@ -1,7 +1,6 @@
--- Simple watermark table for ETL tracking
+-- Create watermarks table for ETL tracking
 -- depends:
 
--- Create watermarks table
 CREATE TABLE IF NOT EXISTS etl_watermarks (
     id SERIAL PRIMARY KEY,
     table_name VARCHAR(100) NOT NULL UNIQUE,
@@ -16,6 +15,10 @@ CREATE TABLE IF NOT EXISTS etl_watermarks (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
--- Basic indexes
+-- Indexes for performance
 CREATE INDEX IF NOT EXISTS idx_etl_watermarks_table_name ON etl_watermarks(table_name);
 CREATE INDEX IF NOT EXISTS idx_etl_watermarks_status ON etl_watermarks(last_extraction_status);
+CREATE INDEX IF NOT EXISTS idx_etl_watermarks_updated ON etl_watermarks(updated_at);
+
+-- Comments
+COMMENT ON TABLE etl_watermarks IS 'Tracks ETL extraction watermarks for incremental processing';
