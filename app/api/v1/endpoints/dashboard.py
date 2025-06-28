@@ -36,7 +36,7 @@ class DashboardAPI(LoggerMixin):
     # =============================================================================
     # DASHBOARD ENDPOINTS
     # =============================================================================
-    
+    @staticmethod
     @router.post("/dashboard", response_model=DashboardData)
     async def get_dashboard_data(
         request: DashboardRequest,
@@ -58,7 +58,7 @@ class DashboardAPI(LoggerMixin):
             
             # Get dashboard data from service
             dashboard_data = await service.get_dashboard_data(
-                filters=request.filters.dict() if request.filters else {},
+                filters=request.filters.model_dump() if request.filters else {},
                 fecha_corte=request.fechaCorte
             )
             
@@ -70,7 +70,8 @@ class DashboardAPI(LoggerMixin):
                 status_code=500,
                 detail=f"Failed to generate dashboard data: {str(e)}"
             )
-    
+
+    @staticmethod
     @router.get("/dashboard", response_model=DashboardData)
     async def get_dashboard_data_get(
         cartera: Optional[List[str]] = Query(default=None, description="Portfolio filters"),
@@ -97,7 +98,7 @@ class DashboardAPI(LoggerMixin):
             
             # Get dashboard data from service
             dashboard_data = await service.get_dashboard_data(
-                filters=filters.dict(),
+                filters=filters.model_dump(),
                 fecha_corte=fecha_corte
             )
             
@@ -112,20 +113,20 @@ class DashboardAPI(LoggerMixin):
     # =============================================================================
     # UTILITY ENDPOINTS
     # =============================================================================
-    
+    @staticmethod
     @router.get("/health", response_model=DashboardHealthResponse)
     async def health_check(
         service: DashboardServiceV2 = Depends(get_dashboard_service)
     ) -> DashboardHealthResponse:
         """
         Health check endpoint
-        
+
         Verifies that the API and data sources are working correctly.
         """
         try:
             health_status = await service.health_check()
             return DashboardHealthResponse(**health_status)
-            
+
         except Exception as e:
             # Return unhealthy status even if health check fails
             return DashboardHealthResponse(
@@ -134,9 +135,10 @@ class DashboardAPI(LoggerMixin):
                 dataSource={"type": "unknown", "connected": False, "dataset": "unknown"},
                 processor={"initialized": False}
             )
-    
+
+    @staticmethod
     @router.get("/filters")
-    async def get_filter_options(self):
+    async def get_filter_options():
         """
         Get available filter options
         
@@ -174,7 +176,8 @@ class DashboardAPI(LoggerMixin):
                 status_code=500,
                 detail=f"Failed to get filter options: {str(e)}"
             )
-    
+
+    @staticmethod
     @router.post("/refresh")
     async def refresh_data(
         background_tasks: BackgroundTasks,
@@ -205,7 +208,8 @@ class DashboardAPI(LoggerMixin):
                 status_code=500,
                 detail=f"Failed to initiate refresh: {str(e)}"
             )
-    
+
+    @staticmethod
     @router.get("/status")
     async def get_api_status(
         service: DashboardServiceV2 = Depends(get_dashboard_service)
@@ -253,7 +257,7 @@ async def _refresh_data_task(cache_service: CacheService, force: bool = False):
         
         # Clear cache if force refresh
         if force:
-            await cache_service.clear_all()
+            await cache_service.clear_by_pattern("*")
             print("Cache cleared due to force refresh")
         
         # TODO: Implement actual refresh logic

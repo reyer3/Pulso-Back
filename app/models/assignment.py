@@ -3,10 +3,11 @@
 Pydantic models matching Frontend AssignmentAnalysisPage types EXACTLY
 """
 
-from typing import List
+from typing import List, Optional, Any, Dict
+
 from pydantic import BaseModel, Field
 
-from app.models.base import BaseResponse
+from app.models import BaseResponse
 from app.models.common import FrontendCompatibleModel, ValueType
 
 
@@ -63,13 +64,20 @@ class AssignmentAnalysisData(FrontendCompatibleModel):
 
 
 class AssignmentAnalysisResponse(BaseResponse):
-    """
-    Assignment analysis API response
-    """
-    data: AssignmentAnalysisData = Field(description="Assignment analysis data")
-    currentPeriod: str = Field(description="Current analysis period")
-    previousPeriod: str = Field(description="Previous comparison period")
-    queryTime: float = Field(description="Query execution time")
+    kpis: List[AssignmentKPI]
+    composition_data: List[CompositionDataPoint] = Field(..., alias="compositionData")
+    detail_breakdown: List[DetailBreakdownRow] = Field(..., alias="detailBreakdown")
+    metadata: Dict[str, Any]
+    success: bool
+    message: str
+    current_period: Optional[str] = Field(None, alias="currentPeriod")
+    previous_period: Optional[str] = Field(None, alias="previousPeriod")
+    query_time: Optional[str] = Field(None, alias="queryTime")
+    data: Optional[Any] = None
+
+    class Config:
+        allow_population_by_field_name = True
+        orm_mode = True
 
 
 # =============================================================================

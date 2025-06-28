@@ -5,9 +5,10 @@ Encapsula la lógica para interactuar con el caché de Redis.
 Construye claves, serializa/deserializa datos y gestiona el TTL.
 """
 import json
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Optional
 
 import redis.asyncio as redis
+
 from app.core.logging import LoggerMixin
 from app.core.middleware import track_cache_hit, track_cache_miss
 
@@ -26,7 +27,8 @@ class CacheService(LoggerMixin):
         """
         self.redis = redis_client
 
-    def _generate_cache_key(self, prefix: str, **kwargs: Any) -> str:
+    @staticmethod
+    def _generate_cache_key(prefix: str, **kwargs: Any) -> str:
         """
         Genera una clave de caché consistente a partir de un prefijo y parámetros.
         """
@@ -112,3 +114,4 @@ class CacheService(LoggerMixin):
         except Exception as e:
             self.logger.error(f"Error al limpiar el caché con el patrón {pattern}: {e}")
             return 0
+

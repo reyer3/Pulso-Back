@@ -83,7 +83,7 @@ class EvolutionController(LoggerMixin):
             if cached_data:
                 self.logger.info(f"Returning cached evolution data for key: {cache_key}")
                 # Cached data is already EvolutionData format
-                return [EvolutionMetric.parse_obj(item) for item in cached_data]
+                return [EvolutionMetric.model_validate(item) for item in cached_data]
             
             # Generate evolution data using dashboard service
             evolution_data = await self.dashboard_service.get_evolution_data(
@@ -101,7 +101,7 @@ class EvolutionController(LoggerMixin):
             # Cache for 1 hour (serialize the array)
             await self.cache_service.set(
                 cache_key, 
-                [metric.dict() for metric in response_data], 
+                [metric.model_dump() for metric in response_data],
                 expire_in=3600
             )
             
@@ -158,14 +158,14 @@ class EvolutionController(LoggerMixin):
             metric_data = EvolutionMetric(
                 metric=metric,
                 valueType=value_type,
-                series=self._create_metric_series(cartera_groups, metric)
+                series=self._create_metric_series(cartera_groups,metric)
             )
             
             metrics_data.append(metric_data)
         
         return metrics_data  # ✅ Array directo, sin wrapper
-    
-    def _group_by_cartera(self, evolution_points: List[Dict]) -> Dict[str, List[Dict]]:
+    @staticmethod
+    def _group_by_cartera(evolution_points: List[Dict]) -> Dict[str, List[Dict]]:
         """
         Group evolution points by cartera for series generation
         
@@ -178,10 +178,9 @@ class EvolutionController(LoggerMixin):
         # For now, treat all data as one group
         # In future, can split by cartera field if available
         return {"TODAS": evolution_points}
-    
+    @staticmethod
     def _create_metric_series(
-        self, 
-        cartera_groups: Dict[str, List[Dict]], 
+        cartera_groups: Dict[str, List[Dict]],
         metric: str
     ) -> List[EvolutionSeries]:
         """

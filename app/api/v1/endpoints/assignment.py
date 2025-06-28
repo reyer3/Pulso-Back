@@ -5,20 +5,20 @@ Portfolio composition analysis and KPI comparison for executive reporting
 
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
 
 from app.core.dependencies import get_dashboard_service, get_cache_service
 from app.core.logging import LoggerMixin
 from app.models.assignment import (
-    AssignmentAnalysisRequest,
     AssignmentAnalysisResponse,
     AssignmentKPI,
     CompositionDataPoint,
     DetailBreakdownRow
 )
-from app.services.dashboard_service_v2 import DashboardServiceV2
 from app.services.cache_service import CacheService
+from app.services.dashboard_service_v2 import DashboardServiceV2
 
 router = APIRouter(prefix="/assignment", tags=["assignment"])
 
@@ -70,7 +70,7 @@ class AssignmentController(LoggerMixin):
             
             if cached_data:
                 self.logger.info(f"Returning cached assignment data for key: {cache_key}")
-                return AssignmentAnalysisResponse.parse_obj(cached_data)
+                return AssignmentAnalysisResponse.model_validate(cached_data)
             
             # Get dashboard data for both periods
             current_data = await self.dashboard_service.get_dashboard_data(
@@ -94,7 +94,7 @@ class AssignmentController(LoggerMixin):
             # Cache for 2 hours
             await self.cache_service.set(
                 cache_key,
-                analysis_response.dict(),
+                analysis_response.model_dump(),
                 expire_in=7200
             )
             
@@ -151,7 +151,11 @@ class AssignmentController(LoggerMixin):
                 "lastRefresh": datetime.now().isoformat()
             },
             success=True,
-            message=f"Assignment analysis generated for {fecha_actual} vs {fecha_anterior}"
+            message=f"Assignment analysis generated for {fecha_actual} vs {fecha_anterior}",
+            currentPeriod=fecha_actual.isoformat(),
+            previousPeriod=fecha_anterior.isoformat(),
+            queryTime=datetime.now().isoformat(),
+            data=current_data,
         )
     
     def _calculate_executive_kpis(
@@ -172,8 +176,8 @@ class AssignmentController(LoggerMixin):
         kpis = []
         
         # Extract totals from dashboard data
-        current_totals = self._extract_totals(current_data)
-        previous_totals = self._extract_totals(previous_data)
+        current_totals = self.extract_totals(current_data)
+        previous_totals = self.extract_totals(previous_data)
         
         # Total Clients KPI
         kpis.append(AssignmentKPI(
@@ -229,7 +233,8 @@ class AssignmentController(LoggerMixin):
         
         return kpis
     
-    def _extract_totals(self, dashboard_data: Dict[str, Any]) -> Dict[str, float]:
+    @staticmethod
+    def extract_totals(dashboard_data: Dict[str, Any]) -> Dict[str, float]:
         """
         Extract total values from dashboard data
         
@@ -257,8 +262,9 @@ class AssignmentController(LoggerMixin):
         totals['clientes'] = int(totals['cuentas'] / 1.2) if totals['cuentas'] > 0 else 0
         
         return totals
-    
-    def _calculate_variation(self, current: float, previous: float) -> float:
+
+    @staticmethod
+    def _calculate_variation(current: float, previous: float) -> float:
         """
         Calculate percentage variation between periods
         
@@ -273,10 +279,10 @@ class AssignmentController(LoggerMixin):
             return 100.0 if current > 0 else 0.0
         
         return round(((current - previous) / previous) * 100, 1)
-    
+
+    @staticmethod
     def _generate_composition_data(
-        self,
-        current_data: Dict[str, Any]
+            current_data: Dict[str, Any]
     ) -> List[CompositionDataPoint]:
         """
         Generate portfolio composition data points
@@ -313,10 +319,27 @@ class AssignmentController(LoggerMixin):
         composition_data.sort(key=lambda x: x.value, reverse=True)
         
         return composition_data
-    
+
+    @staticmethod
+    def _group_segmento_data(segmento_data: List[Dict[str, Any]]) -> Dict[str, Dict[str, float]]:
+        """
+        Agrupa y acumula cuentas y deuda asignada por cartera.
+        Devuelve un diccionario: {cartera: {'cuentas': int, 'deudaAsig': float}}
+        """
+        result = {}
+        for item in segmento_data:
+            if item.get('name') != 'Total':
+                cartera_name = item.get('name', '').split()[0]
+                if cartera_name not in result:
+                    result[cartera_name] = {'cuentas': 0, 'deudaAsig': 0}
+                result[cartera_name]['cuentas'] += item.get('cuentas', 0)
+                result[cartera_name]['deudaAsig'] += item.get('deudaAsig', 0)
+        return result
+
+
     def _create_detail_breakdown(
-        self,
-        current_data: Dict[str, Any],
+            self,
+            current_data: Dict[str, Any],
         previous_data: Dict[str, Any]
     ) -> List[DetailBreakdownRow]:
         """
@@ -332,30 +355,8 @@ class AssignmentController(LoggerMixin):
         detail_rows = []
         
         # Create lookup for previous data
-        previous_lookup = {}
-        for item in previous_data.get('segmentoData', []):
-            if item.get('name') != 'Total':
-                cartera_name = item.get('name', '').split()[0]
-                if cartera_name not in previous_lookup:
-                    previous_lookup[cartera_name] = {
-                        'cuentas': 0,
-                        'deudaAsig': 0
-                    }
-                previous_lookup[cartera_name]['cuentas'] += item.get('cuentas', 0)
-                previous_lookup[cartera_name]['deudaAsig'] += item.get('deudaAsig', 0)
-        
-        # Group current data by cartera
-        current_cartera_data = {}
-        for item in current_data.get('segmentoData', []):
-            if item.get('name') != 'Total':
-                cartera_name = item.get('name', '').split()[0]
-                if cartera_name not in current_cartera_data:
-                    current_cartera_data[cartera_name] = {
-                        'cuentas': 0,
-                        'deudaAsig': 0
-                    }
-                current_cartera_data[cartera_name]['cuentas'] += item.get('cuentas', 0)
-                current_cartera_data[cartera_name]['deudaAsig'] += item.get('deudaAsig', 0)
+        previous_lookup = self._group_segmento_data(previous_data.get('segmentoData', []))
+        current_cartera_data = self._group_segmento_data(current_data.get('segmentoData', []))
         
         # Create detail rows
         for cartera_name, current_values in current_cartera_data.items():
@@ -450,7 +451,7 @@ async def get_assignment_summary(
         )
         
         # Extract summary metrics
-        totals = AssignmentController(dashboard_service, None)._extract_totals(dashboard_data)
+        totals = AssignmentController(dashboard_service, None).extract_totals(dashboard_data)
         
         summary = {
             "fechaCorte": fecha_corte.isoformat(),
@@ -501,3 +502,5 @@ async def assignment_health_check(
                 "timestamp": datetime.now().isoformat()
             }
         )
+
+

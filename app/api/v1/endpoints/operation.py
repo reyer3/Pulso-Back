@@ -3,7 +3,7 @@
 Monitoreo diario del rendimiento del call center y análisis GTR (Global Tasa de Resolución).
 """
 # Imports estándar
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from typing import Any, Dict, List, Optional
 
 # Imports de terceros
@@ -67,7 +67,7 @@ class OperationController(LoggerMixin):
                 cached_data = await self.cache_service.get(cache_key)
                 if cached_data:
                     self.logger.info(f"Retornando datos de operación cacheados para la clave: {cache_key}")
-                    return OperationDayAnalysisData.parse_obj(cached_data)
+                    return OperationDayAnalysisData.model_validate(cached_data)
 
             # Obtener datos del dashboard para la fecha de análisis
             dashboard_data = await self.dashboard_service.get_dashboard_data(
@@ -85,7 +85,7 @@ class OperationController(LoggerMixin):
 
             # Cachear por 30 minutos si el servicio de caché está disponible
             if self.cache_service:
-                await self.cache_service.set(cache_key, analysis_data.dict(), expire_in=1800)
+                await self.cache_service.set(cache_key, analysis_data.model_dump(), expire_in=1800)
 
             self.logger.info(
                 f"Análisis de operación generado para {fecha_analisis} con "
@@ -194,7 +194,8 @@ class OperationController(LoggerMixin):
 
         return kpis
 
-    def _extract_operation_totals(self, dashboard_data: Dict[str, Any]) -> Dict[str, float]:
+    @staticmethod
+    def _extract_operation_totals(dashboard_data: Dict[str, Any]) -> Dict[str, float]:
         """
         Extrae los totales operativos de los datos del dashboard.
 
@@ -276,11 +277,6 @@ class OperationController(LoggerMixin):
         voicebot_calls = int(total_calls * 0.6)
         callcenter_calls = total_calls - voicebot_calls # Asegura que la suma sea total_calls
 
-        # Simular efectividad (ej. Bot menos efectivo por llamada, Humano más efectivo)
-        # Estas tasas son ejemplos y deberían ajustarse con datos reales
-        voicebot_effective_rate = 0.5
-        callcenter_effective_rate = 0.8
-
         voicebot_effective_contacts = int(total_effective_contacts * 0.4) # Ej: Bot maneja 40% de contactos efectivos
         callcenter_effective_contacts = int(total_effective_contacts * 0.6) # Ej: Humano maneja 60%
 
@@ -318,8 +314,9 @@ class OperationController(LoggerMixin):
 
         return channels
 
+    @staticmethod
     def _generate_hourly_performance(
-        self, dashboard_data: Dict[str, Any] # No usado directamente, datos simulados
+            dashboard_data: Dict[str, Any] # No usado directamente, datos simulados
     ) -> List[HourlyPerformance]:
         """
         Genera el desglose de rendimiento por hora.
@@ -362,8 +359,9 @@ class OperationController(LoggerMixin):
             )
         return hourly_data
 
+    @staticmethod
     def _generate_attempt_effectiveness(
-        self, dashboard_data: Dict[str, Any] # No usado directamente, datos simulados
+            dashboard_data: Dict[str, Any] # No usado directamente, datos simulados
     ) -> List[AttemptEffectiveness]:
         """
         Genera el análisis de efectividad por intento.
@@ -386,8 +384,9 @@ class OperationController(LoggerMixin):
             )
         return attempt_data
 
+    @staticmethod
     def _generate_queue_performance(
-        self, dashboard_data: Dict[str, Any]
+            dashboard_data: Dict[str, Any]
     ) -> List[QueuePerformance]:
         """
         Genera métricas de rendimiento de cola.
