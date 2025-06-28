@@ -15,9 +15,9 @@ BigQuery → ETL Pipeline → Redis Cache → FastAPI → React Dashboard
 ## 🎯 Stack Tecnológico
 
 - **FastAPI** - API REST con OpenAPI automático
-- **Redis** - Cache de consultas frecuentes  
-- **PostgreSQL** - Storage para ETL
-- **BigQuery** - Source of truth
+- **Redis** - Cache de consultas frecuentes
+- **PostgreSQL (asyncpg)** - Storage para ETL (acceso con `asyncpg`)
+- **BigQuery (`google-cloud-bigquery`)** - Source of truth (acceso directo con cliente oficial)
 - **Docker** - Containerización
 - **Traefik** - Reverse proxy
 - **Celery** - Job scheduling
@@ -94,7 +94,9 @@ GET  /docs                 # OpenAPI docs
 Integrado con tu stack existente:
 - **Traefik** - Routing automático
 - **Redis** - Reutiliza tu instancia
-- **PostgreSQL** - Nuevo servicio
+- **PostgreSQL** - Nuevo servicio (usando `asyncpg`, no `psycopg2`)
+
+**Nota importante sobre dependencias de base de datos:** El backend solo usa BigQuery (via `google-cloud-bigquery`) y PostgreSQL (via `asyncpg`). No hay dependencia de `psycopg2` ni de SQLAlchemy para el acceso en tiempo de ejecución a PostgreSQL. SQLAlchemy puede seguir usándose para migraciones con Alembic si es necesario.
 
 ## 📊 Monitoring
 
