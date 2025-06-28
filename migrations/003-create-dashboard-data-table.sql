@@ -1,5 +1,6 @@
 -- Main dashboard metrics table, optimized for time-series analysis with TimescaleDB
 -- depends: 001-create-watermarks-table
+-- depends: 000-enable-timescaledb
 
 CREATE TABLE dashboard_data (
     fecha_foto DATE NOT NULL,
@@ -40,7 +41,7 @@ CREATE INDEX idx_dashboard_data_servicio ON dashboard_data(servicio);
 CREATE INDEX idx_dashboard_data_procesamiento ON dashboard_data(fecha_procesamiento);
 
 -- TimescaleDB hypertable for time-series data
-SELECT create_hypertable('dashboard_data', 'fecha_foto', chunk_time_interval => INTERVAL '7 days', if_not_exists => TRUE);
+SELECT create_hypertable('dashboard_data', by_range('fecha_foto', INTERVAL '7 days'), if_not_exists => TRUE);
 
 -- Retention policy to manage data storage
 SELECT add_retention_policy('dashboard_data', INTERVAL '2 years', if_not_exists => TRUE);

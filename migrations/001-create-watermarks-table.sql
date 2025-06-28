@@ -1,5 +1,5 @@
 -- Watermark tracking table for ETL incremental processing
--- depends:
+-- depends: 000-enable-timescaledb
 
 CREATE TABLE etl_watermarks (
     id SERIAL PRIMARY KEY,

@@ -1,5 +1,6 @@
 -- ETL execution log for monitoring and debugging
 -- depends: 001-create-watermarks-table
+-- depends: 000-enable-timescaledb
 
 CREATE TABLE etl_execution_log (
     id SERIAL PRIMARY KEY,
@@ -31,7 +32,7 @@ CREATE INDEX idx_etl_execution_log_started ON etl_execution_log(started_at);
 
 -- TimescaleDB hypertable
 -- This will only succeed if the TimescaleDB extension is installed.
-SELECT create_hypertable('etl_execution_log', 'started_at', chunk_time_interval => INTERVAL '1 month', if_not_exists => TRUE);
+SELECT create_hypertable('etl_execution_log', by_range('started_at', INTERVAL '1 month'), if_not_exists => TRUE);
 
 -- Retention policy
 SELECT add_retention_policy('etl_execution_log', INTERVAL '6 months', if_not_exists => TRUE);

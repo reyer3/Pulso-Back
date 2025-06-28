@@ -1,5 +1,6 @@
 -- Time series data for evolution analysis, optimized with TimescaleDB
 -- depends: 001-create-watermarks-table
+-- depends: 000-enable-timescaledb
 
 CREATE TABLE evolution_data (
     fecha_foto DATE NOT NULL,
@@ -24,7 +25,7 @@ CREATE INDEX idx_evolution_data_cartera ON evolution_data(cartera);
 CREATE INDEX idx_evolution_data_composite ON evolution_data(fecha_foto, cartera);
 
 -- TimescaleDB hypertable for time-series data
-SELECT create_hypertable('evolution_data', 'fecha_foto', chunk_time_interval => INTERVAL '7 days', if_not_exists => TRUE);
+SELECT create_hypertable('evolution_data', by_range('fecha_foto', INTERVAL '7 days'), if_not_exists => TRUE);
 
 -- Retention policy to manage data storage
 SELECT add_retention_policy('evolution_data', INTERVAL '2 years', if_not_exists => TRUE);

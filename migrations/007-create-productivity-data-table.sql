@@ -1,5 +1,6 @@
 -- Daily productivity metrics by agent, optimized with TimescaleDB
 -- depends: 001-create-watermarks-table
+-- depends: 000-enable-timescaledb
 
 CREATE TABLE productivity_data (
     fecha_foto DATE NOT NULL,
@@ -28,7 +29,7 @@ CREATE INDEX idx_productivity_data_equipo ON productivity_data(equipo);
 CREATE INDEX idx_productivity_data_composite ON productivity_data(fecha_foto, equipo);
 
 -- TimescaleDB hypertable for time-series data
-SELECT create_hypertable('productivity_data', 'fecha_foto', chunk_time_interval => INTERVAL '7 days', if_not_exists => TRUE);
+SELECT create_hypertable('productivity_data', by_range('fecha_foto', INTERVAL '7 days'), if_not_exists => TRUE);
 
 -- Retention policy to manage data storage
 SELECT add_retention_policy('productivity_data', INTERVAL '2 years', if_not_exists => TRUE);
