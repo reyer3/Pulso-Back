@@ -5,7 +5,7 @@ Shared types used across all models - matches Frontend exactly
 
 from enum import Enum
 from typing import Dict, List, Union
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 
 # =============================================================================
@@ -78,7 +78,7 @@ class KPI(BaseModel):
     value: str = Field(description="KPI value as string")
     change: float = Field(description="Change percentage") 
     icon: str = Field(description="Icon name")
-    color: str = Field(description="Color theme", regex="^(blue|green|yellow|purple|red|gray)$")
+    color: str = Field(description="Color theme", pattern="^(blue|green|yellow|purple|red|gray)$")  # ✅ V2: regex → pattern
 
 
 class ChartDataPoint(BaseModel):
@@ -105,7 +105,8 @@ class FilterOption(BaseModel):
 
 class FilterOptions(BaseModel):
     """Filter options structure - matches Frontend FilterOptions exactly"""
-    __root__: Dict[str, List[FilterOption]] = Field(
+    # ✅ V2: Simplified root model approach
+    options: Dict[str, List[FilterOption]] = Field(
         description="Filter options by category"
     )
 
@@ -139,10 +140,12 @@ class FrontendCompatibleModel(BaseModel):
     Base model with camelCase aliases for perfect Frontend compatibility
     """
     
-    class Config:
+    # ✅ V2: Updated configuration
+    model_config = ConfigDict(
         # Auto-generate camelCase aliases for all fields
-        alias_generator = to_camel_case
+        alias_generator=to_camel_case,
         # Allow using both snake_case and camelCase field names
-        allow_population_by_field_name = True
+        populate_by_name=True,  # ✅ V2: allow_population_by_field_name → populate_by_name
         # Use enum values in serialization
-        use_enum_values = True
+        use_enum_values=True
+    )
