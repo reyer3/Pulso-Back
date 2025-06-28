@@ -12,9 +12,7 @@ from app.models.base import BaseResponse, CacheInfo
 from app.models.common import (
     IconStatus, 
     FrontendCompatibleModel,
-    Percentage, 
-    Amount, 
-    Count
+    to_camel_case  # ✅ Import the function instead of field helpers
 )
 
 
@@ -165,12 +163,10 @@ class DashboardResponse(BaseResponse):
     cache_info: Optional[CacheInfo] = None
     query_time: Optional[float] = None
     
+    # ✅ V2: Use the consistent camelCase function
     model_config = ConfigDict(
-        # Ensure camelCase serialization for frontend
-        alias_generator=lambda field_name: ''.join(
-            word.capitalize() if i > 0 else word 
-            for i, word in enumerate(field_name.split('_'))
-        )
+        alias_generator=to_camel_case,
+        populate_by_name=True
     )
 
 
