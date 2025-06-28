@@ -1,192 +1,193 @@
 """
-📊 Dashboard data models
-Pydantic models for dashboard API responses
+📊 Dashboard Data Models  
+Pydantic models matching Frontend types EXACTLY
 """
 
 from datetime import date, datetime
 from typing import List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
-from app.models.base import BaseResponse, CacheInfo, Amount, Count, Percentage
+from app.models.base import BaseResponse, CacheInfo
+from app.models.common import (
+    IconStatus, 
+    FrontendCompatibleModel,
+    Percentage, 
+    Amount, 
+    Count
+)
 
 
-# Request models
+# =============================================================================
+# REQUEST MODELS
+# =============================================================================
+
 class DashboardFilters(BaseModel):
-    """
-    Dashboard filter parameters
-    """
-    cartera: Optional[List[str]] = Field(default=None, description="Cartera filter")
-    servicio: Optional[List[str]] = Field(default=None, description="Servicio filter (MOVIL, FIJA)")
-    periodo: Optional[List[str]] = Field(default=None, description="Periodo filter (YYYY-MM)")
-    tramo: Optional[List[str]] = Field(default=None, description="Tramo filter")
-    vencimiento: Optional[List[int]] = Field(default=None, description="Vencimiento filter")
-    rango_deuda: Optional[List[str]] = Field(default=None, description="Rango deuda filter")
-    date_from: Optional[date] = Field(default=None, description="Start date filter")
-    date_to: Optional[date] = Field(default=None, description="End date filter")
+    """Dashboard filter parameters"""
+    cartera: Optional[List[str]] = None
+    servicio: Optional[List[str]] = None  
+    periodo: Optional[List[str]] = None
+    tramo: Optional[List[str]] = None
+    vencimiento: Optional[List[int]] = None
+    rangoDeuda: Optional[List[str]] = None
+    fechaInicio: Optional[date] = None
+    fechaFin: Optional[date] = None
 
 
-class ChartDimensions(BaseModel):
-    """
-    Chart grouping dimensions
-    """
-    dimensions: List[str] = Field(
-        default=["cartera"], 
-        description="Grouping dimensions for charts"
-    )
+# =============================================================================
+# DATA MODELS - EXACT FRONTEND MATCH
+# =============================================================================
 
-
-# Data models
-class DataRow(BaseModel):
+class DataRow(FrontendCompatibleModel):
     """
-    Main dashboard data row
+    Main dashboard data row - EXACT match with Frontend DataRow interface
     """
     id: str = Field(description="Unique identifier")
     name: str = Field(description="Display name")
+    status: IconStatus = Field(description="Row status icon")
     
     # Volume metrics
-    cuentas: Count = Field(description="Total accounts")
-    porcentaje_cuentas: Percentage = Field(description="Percentage of accounts")
-    clientes: Count = Field(description="Total clients")
+    cuentas: int = Field(description="Total accounts")
+    porcentajeCuentas: float = Field(description="Percentage of accounts")
     
-    # Debt metrics
-    deuda_asig: Amount = Field(description="Assigned debt amount")
-    porcentaje_deuda_asig: Percentage = Field(description="Percentage of assigned debt")
-    deuda_actual: Amount = Field(description="Current debt amount")
-    porcentaje_deuda_actual: Percentage = Field(description="Percentage of current debt")
+    # Debt metrics  
+    deudaAsig: float = Field(description="Assigned debt amount")
+    porcentajeDeuda: float = Field(description="Percentage of assigned debt")
+    porcentajeDeudaStatus: IconStatus = Field(description="Assigned debt status")
+    deudaAct: float = Field(description="Current debt amount")
+    porcentajeDeudaAct: float = Field(description="Percentage of current debt") 
+    porcentajeDeudaActStatus: IconStatus = Field(description="Current debt status")
     
     # Management metrics
-    cobertura: Percentage = Field(description="Coverage percentage")
-    contactabilidad: Percentage = Field(description="Contact rate")
-    contacto_directo: Percentage = Field(description="Direct contact percentage")
-    contacto_indirecto: Percentage = Field(description="Indirect contact percentage")
-    sin_contacto: Percentage = Field(description="No contact percentage")
+    cobertura: float = Field(description="Coverage percentage")
+    contacto: float = Field(description="Contact rate")
+    contactoStatus: IconStatus = Field(description="Contact status")
+    cd: float = Field(description="Direct contact percentage")
+    ci: float = Field(description="Indirect contact percentage") 
+    sc: float = Field(description="No contact percentage")
     
     # Performance metrics
-    cierre: Percentage = Field(description="Closure rate")
-    intensidad: float = Field(ge=0, description="Management intensity")
-    conversion_pdp: Percentage = Field(description="PDP conversion rate")
+    cierre: float = Field(description="Closure rate")
+    cierreStatus: IconStatus = Field(description="Closure status")
+    inten: float = Field(description="Management intensity")
+    intenStatus: IconStatus = Field(description="Intensity status")
     
     # Counters
-    cuentas_cd: Count = Field(description="Direct contact accounts")
-    cuentas_ci: Count = Field(description="Indirect contact accounts")
-    cuentas_sc: Count = Field(description="No contact accounts")
-    cuentas_sg: Count = Field(description="No management accounts")
-    cuentas_pdp: Count = Field(description="PDP accounts")
-    cuentas_pagadoras: Count = Field(description="Paying accounts")
+    cdCount: int = Field(description="Direct contact accounts")
+    ciCount: int = Field(description="Indirect contact accounts")
+    scCount: int = Field(description="No contact accounts")
+    sgCount: int = Field(description="No management accounts")
+    pdpCount: int = Field(description="PDP accounts")
+    fracCount: int = Field(description="Fractionation accounts")
+    pdpFracCount: int = Field(description="PDP + Fractionation accounts")
     
-    # Recovery metrics
-    recupero: Amount = Field(description="Recovery amount")
-    recupero_con_pdp: Amount = Field(description="Recovery with PDP")
-    recupero_sin_pdp: Amount = Field(description="Recovery without PDP")
-    
-    # Additional info
-    fecha_asignacion: Optional[date] = Field(description="Assignment date")
-    fecha_cierre: Optional[date] = Field(description="Closure date")
-    dias_gestion: Optional[int] = Field(description="Management days")
-    estado_cartera: Optional[str] = Field(description="Portfolio status")
+    # Optional temporal info
+    fechaAsignacion: Optional[str] = Field(description="Assignment date")
+    fechaCierre: Optional[str] = Field(description="Closure date")
+    diasGestion: Optional[int] = Field(description="Management days")
+    diasHabiles: Optional[int] = Field(description="Business days")
 
 
-class TotalRow(BaseModel):
+class TotalRow(FrontendCompatibleModel):
     """
-    Total/summary row for dashboard
+    Total/summary row - EXACT match with Frontend TotalRow interface
     """
     id: str = "total"
     name: str = "Total"
+    status: IconStatus = IconStatus.NONE
     
     # Same fields as DataRow but aggregated
-    cuentas: Count
-    porcentaje_cuentas: Percentage = 100.0
-    clientes: Count
-    deuda_asig: Amount
-    porcentaje_deuda_asig: Percentage = 100.0
-    deuda_actual: Amount
-    porcentaje_deuda_actual: Percentage = 100.0
-    cobertura: Percentage
-    contactabilidad: Percentage
-    contacto_directo: Percentage
-    contacto_indirecto: Percentage
-    sin_contacto: Percentage
-    cierre: Percentage
-    intensidad: float
-    conversion_pdp: Percentage
-    cuentas_cd: Count
-    cuentas_ci: Count
-    cuentas_sc: Count
-    cuentas_sg: Count
-    cuentas_pdp: Count
-    cuentas_pagadoras: Count
-    recupero: Amount
-    recupero_con_pdp: Amount
-    recupero_sin_pdp: Amount
+    cuentas: int
+    porcentajeCuentas: float = 100.0
+    deudaAsig: float
+    porcentajeDeuda: float = 100.0
+    porcentajeDeudaStatus: IconStatus = IconStatus.NONE
+    deudaAct: float
+    porcentajeDeudaAct: float = 100.0
+    porcentajeDeudaActStatus: IconStatus = IconStatus.NONE
+    cobertura: float
+    contacto: float
+    contactoStatus: IconStatus = IconStatus.NONE
+    cd: float
+    ci: float
+    sc: float
+    cierre: float
+    cierreStatus: IconStatus = IconStatus.NONE
+    inten: float
+    intenStatus: IconStatus = IconStatus.NONE
+    cdCount: int
+    ciCount: int
+    scCount: int
+    sgCount: int
+    pdpCount: int
+    fracCount: int
+    pdpFracCount: int
+    fechaAsignacion: Optional[str] = None
+    fechaCierre: Optional[str] = None
+    diasGestion: Optional[int] = None
+    diasHabiles: Optional[int] = None
 
 
-class IntegralChartDataPoint(BaseModel):
+class IntegralChartDataPoint(FrontendCompatibleModel):
     """
-    Data point for integral KPI charts
+    Chart data point - EXACT match with Frontend IntegralChartDataPoint interface
     """
     name: str = Field(description="Dimension name")
-    cobertura: Percentage = Field(description="Coverage rate")
-    contactabilidad: Percentage = Field(description="Contact rate")
-    contacto_directo: Percentage = Field(description="Direct contact rate")
-    contacto_indirecto: Percentage = Field(description="Indirect contact rate")
-    cierre: Percentage = Field(description="Closure rate")
+    cobertura: float = Field(description="Coverage rate")
+    contacto: float = Field(description="Contact rate")
+    contactoDirecto: float = Field(description="Direct contact rate")
+    contactoIndirecto: float = Field(description="Indirect contact rate")
+    tasaDeCierre: float = Field(description="Closure rate")
     intensidad: float = Field(description="Management intensity")
-    efectividad: Percentage = Field(description="Effectiveness rate")
 
 
-# Response models
-class DashboardData(BaseModel):
+# =============================================================================
+# RESPONSE MODELS - EXACT FRONTEND MATCH
+# =============================================================================
+
+# TableData type alias - matches Frontend exactly
+TableData = List[DataRow]
+
+class DashboardData(FrontendCompatibleModel):
     """
-    Complete dashboard data response
+    Complete dashboard data - EXACT match with Frontend DashboardData interface
     """
-    segmento_data: List[DataRow] = Field(description="Segment breakdown data")
-    negocio_data: List[DataRow] = Field(description="Business line breakdown data")
-    total_row: TotalRow = Field(description="Total summary row")
-    integral_chart_data: List[IntegralChartDataPoint] = Field(description="Chart data points")
-    
-    # Metadata
-    filters_applied: DashboardFilters = Field(description="Applied filters")
-    chart_dimensions: List[str] = Field(description="Chart grouping dimensions")
-    last_updated: datetime = Field(description="Last data update")
-    record_count: int = Field(description="Total records processed")
+    segmentoData: TableData = Field(description="Segment breakdown data")
+    negocioData: TableData = Field(description="Business line breakdown data")
+    integralChartData: List[IntegralChartDataPoint] = Field(description="Chart data points")
 
 
 class DashboardResponse(BaseResponse):
     """
-    Dashboard API response
+    Dashboard API response with metadata
     """
     data: DashboardData = Field(description="Dashboard data")
-    cache_info: Optional[CacheInfo] = Field(description="Cache information")
-    query_time: Optional[float] = Field(description="Query execution time in seconds")
+    cache_info: Optional[CacheInfo] = None
+    query_time: Optional[float] = None
+    
+    model_config = ConfigDict(
+        # Ensure camelCase serialization for frontend
+        alias_generator=lambda field_name: ''.join(
+            word.capitalize() if i > 0 else word 
+            for i, word in enumerate(field_name.split('_'))
+        )
+    )
 
 
-# Validation and summary models
-class DashboardSummary(BaseModel):
-    """
-    Dashboard summary statistics
-    """
-    total_portfolios: int
-    active_portfolios: int
-    total_accounts: int
-    total_assigned_debt: Amount
-    total_current_debt: Amount
-    total_recovery: Amount
-    average_coverage: Percentage
-    average_contact_rate: Percentage
-    average_closure_rate: Percentage
+# =============================================================================
+# REQUEST MODELS FOR API ENDPOINTS
+# =============================================================================
+
+class DashboardRequest(BaseModel):
+    """Dashboard request with filters and dimensions"""
+    filters: Optional[DashboardFilters] = Field(default_factory=DashboardFilters)
+    fechaCorte: Optional[date] = None
+    dimensions: Optional[List[str]] = Field(default=["cartera"])
 
 
-class PortfolioStatus(BaseModel):
-    """
-    Portfolio status information
-    """
-    archivo: str
-    estado: str  # ABIERTA, CERRADA, PROXIMA_A_CERRAR
-    fecha_asignacion: date
-    fecha_cierre: Optional[date]
-    dias_restantes: Optional[int]
-    cuentas: int
-    deuda_asignada: Amount
-    recupero_actual: Amount
-    efectividad: Percentage
+class DashboardHealthResponse(BaseModel):
+    """Health check response for dashboard service"""
+    status: str
+    timestamp: str
+    dataSource: dict
+    processor: dict
