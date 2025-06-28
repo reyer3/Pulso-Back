@@ -11,9 +11,9 @@ from fastapi.responses import JSONResponse
 from app.core.dependencies import get_dashboard_service, get_cache_service
 from app.core.logging import LoggerMixin
 from app.models.operation import (
-    OperationDayRequest,           # ✅ CORRECTO
-    OperationDayAnalysisData,      # ✅ CORRECTO
-    OperationDayAnalysisResponse,  # ✅ CORRECTO
+    OperationDayRequest,           # ✅ USADO: POST endpoint
+    OperationDayAnalysisData,      # ✅ USADO: Response model
+    # OperationDayAnalysisResponse, # ❌ REMOVIDO: No se usa
     OperationDayKPI,
     ChannelMetric,
     HourlyPerformance,
@@ -111,7 +111,7 @@ class OperationController(LoggerMixin):
         include_hourly: bool,
         include_attempts: bool,
         include_queues: bool
-    ) -> OperationDayAnalysisData:  # ✅ CORRECTO
+    ) -> OperationDayAnalysisData:
         """
         Generate complete operation analysis from dashboard data
         
@@ -435,7 +435,7 @@ class OperationController(LoggerMixin):
 # FASTAPI ENDPOINTS
 # =============================================================================
 
-@router.get("/", response_model=OperationDayAnalysisData)  # ✅ CORRECTO
+@router.get("/", response_model=OperationDayAnalysisData)
 async def get_operation_analysis(
     fecha_analisis: Optional[date] = Query(None, description="Analysis date (YYYY-MM-DD)"),
     include_hourly: bool = Query(True, description="Include hourly performance breakdown"),
@@ -443,7 +443,7 @@ async def get_operation_analysis(
     include_queues: bool = Query(True, description="Include queue performance metrics"),
     dashboard_service: DashboardServiceV2 = Depends(get_dashboard_service),
     cache_service: CacheService = Depends(get_cache_service)
-) -> OperationDayAnalysisData:  # ✅ CORRECTO
+) -> OperationDayAnalysisData:
     """
     Get daily operation analysis for call center performance monitoring
     
@@ -473,7 +473,7 @@ async def get_operation_analysis(
     )
 
 
-@router.post("/", response_model=OperationDayAnalysisData)  # ✅ NUEVO
+@router.post("/", response_model=OperationDayAnalysisData)
 async def get_operation_analysis_post(
     request: OperationDayRequest,
     dashboard_service: DashboardServiceV2 = Depends(get_dashboard_service),
