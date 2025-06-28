@@ -144,8 +144,8 @@ class ETLAPI(LoggerMixin):
     @router.post("/refresh/table/{table_name}")
     async def refresh_single_table(
         table_name: str,
-        force: bool = Query(default=False, description="Force refresh even if recent"),
-        background_tasks: BackgroundTasks
+        background_tasks: BackgroundTasks,
+        force: bool = Query(default=False, description="Force refresh even if recent")
     ):
         """
         Refresh a specific table
