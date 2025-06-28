@@ -136,7 +136,7 @@ class DashboardAPI(LoggerMixin):
             )
     
     @router.get("/filters")
-    async def get_filter_options():
+    async def get_filter_options(self):
         """
         Get available filter options
         
