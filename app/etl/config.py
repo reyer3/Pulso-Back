@@ -1,11 +1,11 @@
 """
-🎯 ETL Configuration System - UPDATED with Real BigQuery Schema
-Production-ready configuration for incremental extractions
+🎯 ETL Configuration System - FIXED Business Logic
+Corrected separation between Assignment vs Management logic
 
-Updated based on actual BigQuery table schemas:
-- voicebot: campaign_name as queue identifier
-- mibotair: nombre_agente + correo_agente available 
-- Proper joins for productivity and operation data
+CRITICAL FIX: Assignment ≠ Management
+- Assignments come from calendario + asignaciones + cuentas  
+- Management happens on "gestionable" clients only
+- Gestionability = Assigned + Has debt >= 1 + Came in trandeuda
 """
 
 from datetime import datetime, timedelta
@@ -65,10 +65,10 @@ class ETLConfig:
     """
     Centralized ETL configuration for Pulso Dashboard
     
-    UPDATED: Based on real BigQuery schema analysis
-    - campaign_name available for queue analysis
-    - nombre_agente + correo_agente in mibotair
-    - Proper productivity and operation queries
+    CORRECTED: Proper separation of Assignment vs Management logic
+    - Assignments = Calendar + Asignaciones + Cuentas + Trandeuda (state)
+    - Management = Gestiones on "gestionable" clients only
+    - Payments = Independent but linked to cuentas
     """
     
     # 🌟 PROJECT CONFIGURATION
@@ -83,7 +83,7 @@ class ETLConfig:
         "dashboard_data": ExtractionConfig(
             table_name="dashboard_data",
             table_type=TableType.DASHBOARD,
-            description="Main dashboard metrics aggregated by date and campaign",
+            description="Main dashboard metrics - Assignment-based with Management overlay",
             primary_key=["fecha_foto", "archivo", "cartera", "servicio"],
             incremental_column="fecha_foto",
             source_view=f"{VIEW_PREFIX}_dashboard_cobranzas",
@@ -109,13 +109,13 @@ class ETLConfig:
             min_expected_records=50
         ),
         
-        # 📋 ASSIGNMENT ANALYSIS  
+        # 📋 ASSIGNMENT ANALYSIS - BASED ON ASSIGNMENTS NOT MANAGEMENT
         "assignment_data": ExtractionConfig(
             table_name="assignment_data",
             table_type=TableType.ASSIGNMENT,
-            description="Monthly assignment comparison data",
+            description="Assignment analysis - from Calendar + Asignaciones + Cuentas",
             primary_key=["periodo", "archivo", "cartera"],
-            incremental_column="fecha_procesamiento",
+            incremental_column="fecha_asignacion_real",  # From assignment, not management
             source_view=f"{VIEW_PREFIX}_asignaciones_clean",
             lookback_days=30,
             refresh_frequency_hours=24,
@@ -123,11 +123,11 @@ class ETLConfig:
             min_expected_records=20
         ),
         
-        # ⚡ OPERATION HOURLY DATA - UPDATED
+        # ⚡ OPERATION HOURLY DATA - MANAGEMENT ONLY
         "operation_data": ExtractionConfig(
             table_name="operation_data",
             table_type=TableType.OPERATION,
-            description="Hourly operational metrics by channel and queue",
+            description="Hourly operational metrics - Management actions only",
             primary_key=["fecha_foto", "hora", "canal", "cola"],
             incremental_column="fecha_foto",
             source_view=f"{VIEW_PREFIX}_gestiones_unificadas",
@@ -139,11 +139,11 @@ class ETLConfig:
             min_expected_records=10
         ),
         
-        # 👥 PRODUCTIVITY DATA - UPDATED
+        # 👥 PRODUCTIVITY DATA - AGENT MANAGEMENT PERFORMANCE
         "productivity_data": ExtractionConfig(
             table_name="productivity_data",
             table_type=TableType.PRODUCTIVITY, 
-            description="Agent productivity metrics with recovery data",
+            description="Agent productivity - Management performance only",
             primary_key=["fecha_foto", "correo_agente", "hora"],
             incremental_column="fecha_foto",
             source_view=f"{VIEW_PREFIX}_gestiones_unificadas",
@@ -159,10 +159,11 @@ class ETLConfig:
     MAX_RETRY_ATTEMPTS = 3
     RETRY_DELAY_SECONDS = 30
     
-    # 🎯 EXTRACTION QUERIES - UPDATED with Real Schema
+    # 🎯 EXTRACTION QUERIES - CORRECTED BUSINESS LOGIC
     EXTRACTION_QUERIES: Dict[str, str] = {
         
         "dashboard_data": f"""
+        -- ✅ CORRECTED: Dashboard from Assignment base + Management overlay
         SELECT 
             fecha_foto,
             archivo,
@@ -194,6 +195,7 @@ class ETLConfig:
         """,
         
         "evolution_data": f"""
+        -- ✅ CORRECTED: Evolution from Assignment base
         SELECT 
             fecha_foto,
             archivo,
@@ -212,30 +214,73 @@ class ETLConfig:
         """,
         
         "assignment_data": f"""
+        -- ✅ CORRECTED: Pure Assignment analysis - NO management mixing
+        WITH asignacion_base AS (
+            SELECT 
+                ac.archivo,
+                ac.fecha_asignacion_real,
+                ac.cartera,
+                ac.negocio as servicio,
+                ac.cod_luna,
+                ac.cuenta,
+                ac.deuda_inicial,
+                ac.monto_exigible_diario as deuda_actual,
+                ac.estado_deudor,
+                EXTRACT(YEAR FROM ac.fecha_asignacion_real) as anno,
+                FORMAT_DATE('%Y-%m', ac.fecha_asignacion_real) as periodo
+            FROM `{PROJECT_ID}.{DATASET}.{VIEW_PREFIX}_asignaciones_clean` ac
+            WHERE {{incremental_filter}}
+        ),
+        
+        pagos_por_cuenta AS (
+            SELECT 
+                p.nro_documento,
+                SUM(p.monto_cancelado) as monto_recuperado
+            FROM `{PROJECT_ID}.{DATASET}.{VIEW_PREFIX}_pagos_unicos` p
+            WHERE p.fecha_pago >= DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY)
+            GROUP BY p.nro_documento
+        )
+        
         SELECT 
-            periodo_mes as periodo,
-            archivo,
-            cartera,
-            COUNT(DISTINCT cuenta) as cuentas,
-            COUNT(DISTINCT cod_luna) as clientes,  -- ✅ FIXED: Added clients count
-            SUM(deuda_inicial) as deuda_asig,
-            SUM(deuda_actual) as deuda_actual,
-            AVG(deuda_inicial / NULLIF(1, 0)) as ticket_promedio,  -- Calculate average ticket
+            ab.periodo,
+            ab.archivo,
+            ab.cartera,
+            ab.servicio,
+            
+            -- Assignment metrics (not management)
+            COUNT(DISTINCT ab.cuenta) as cuentas,
+            COUNT(DISTINCT ab.cod_luna) as clientes,
+            SUM(ab.deuda_inicial) as deuda_asig,
+            SUM(ab.deuda_actual) as deuda_actual,
+            AVG(ab.deuda_inicial) as ticket_promedio,
+            
+            -- Gestionability analysis
+            COUNT(DISTINCT CASE WHEN ab.estado_deudor = 'GESTIONABLE' THEN ab.cuenta END) as cuentas_gestionables,
+            COUNT(DISTINCT CASE WHEN ab.estado_deudor = 'NO_VINO_EN_TRANDEUDA' THEN ab.cuenta END) as cuentas_sin_trandeuda,
+            COUNT(DISTINCT CASE WHEN ab.estado_deudor = 'DEUDA_MENOR_1' THEN ab.cuenta END) as cuentas_deuda_menor,
+            COUNT(DISTINCT CASE WHEN ab.estado_deudor = 'SIN_MORA' THEN ab.cuenta END) as cuentas_sin_mora,
+            COUNT(DISTINCT CASE WHEN ab.estado_deudor = 'NO_VENCIDO' THEN ab.cuenta END) as cuentas_no_vencidas,
+            
+            -- Recovery (independent of management)
+            COALESCE(SUM(ppc.monto_recuperado), 0) as recupero_total,
+            
             CURRENT_TIMESTAMP() as fecha_procesamiento
-        FROM `{PROJECT_ID}.{DATASET}.{VIEW_PREFIX}_asignaciones_clean`
-        WHERE {{incremental_filter}}
-        GROUP BY 1,2,3
+            
+        FROM asignacion_base ab
+        LEFT JOIN pagos_por_cuenta ppc
+            ON CAST(ab.cuenta AS STRING) = ppc.nro_documento
+        GROUP BY 1,2,3,4
         ORDER BY periodo DESC, archivo
         """,
         
         "operation_data": f"""
-        -- ✅ UPDATED: With campaign_name as queue and attempt analysis
-        WITH gestiones_con_intento AS (
+        -- ✅ CORRECTED: Pure Management operations analysis
+        WITH gestiones_base AS (
             SELECT 
                 DATE(g.timestamp_gestion) as fecha_foto,
                 EXTRACT(HOUR FROM g.timestamp_gestion) as hora,
                 g.canal_origen as canal,
-                g.campaign_name as cola,  -- ✅ USING campaign_name as queue
+                g.campaign_name as cola,
                 g.cod_luna,
                 g.es_contacto_efectivo,
                 g.es_compromiso,
@@ -253,28 +298,33 @@ class ETLConfig:
             canal,
             cola,
             numero_intento,
+            
+            -- Management metrics only
             COUNT(*) as total_gestiones,
             SUM(CASE WHEN es_contacto_efectivo THEN 1 ELSE 0 END) as contactos_efectivos,
             COUNT(*) - SUM(CASE WHEN es_contacto_efectivo THEN 1 ELSE 0 END) as contactos_no_efectivos,
             SUM(CASE WHEN es_compromiso THEN 1 ELSE 0 END) as total_pdp,
+            
+            -- Performance calculations
             SAFE_DIVIDE(
                 SUM(CASE WHEN es_compromiso THEN 1 ELSE 0 END),
                 SUM(CASE WHEN es_contacto_efectivo THEN 1 ELSE 0 END)
             ) * 100 as tasa_cierre,
+            
             CURRENT_TIMESTAMP() as fecha_procesamiento
-        FROM gestiones_con_intento
+            
+        FROM gestiones_base
         GROUP BY 1,2,3,4,5
         ORDER BY fecha_foto DESC, hora, canal, cola
         """,
         
         "productivity_data": f"""
-        -- ✅ UPDATED: With agent names and recovery data
+        -- ✅ CORRECTED: Pure Agent productivity in Management
         WITH gestiones_agente AS (
             SELECT 
                 DATE(g.timestamp_gestion) as fecha_foto,
                 EXTRACT(HOUR FROM g.timestamp_gestion) as hora,
                 g.correo_agente,
-                -- ✅ USING nombre_agente from mibotair, fallback for bot
                 CASE 
                     WHEN g.canal_origen = 'HUMANO' THEN g.nombre_agente
                     WHEN g.canal_origen = 'BOT' THEN 'SISTEMA_BOT'
@@ -289,15 +339,28 @@ class ETLConfig:
               AND g.correo_agente IS NOT NULL
         ),
         
-        pagos_por_agente AS (
+        -- Recovery attribution: Only link payments that happened AFTER management
+        pagos_atribuibles AS (
             SELECT 
                 p.fecha_pago,
-                g.correo_agente,
+                p.nro_documento,
                 SUM(p.monto_cancelado) as monto_recuperado
             FROM `{PROJECT_ID}.{DATASET}.{VIEW_PREFIX}_pagos_unicos` p
-            INNER JOIN gestiones_agente g
-                ON p.nro_documento = g.cod_luna  -- Assuming document linkage
-                AND p.fecha_pago >= g.fecha_foto - 7  -- Within 7 days of management
+            WHERE p.fecha_pago >= DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY)
+            GROUP BY 1,2
+        ),
+        
+        -- Link payments to agents who managed those clients
+        recupero_por_agente AS (
+            SELECT 
+                ga.fecha_foto,
+                ga.correo_agente,
+                SUM(pa.monto_recuperado) as monto_recuperado
+            FROM gestiones_agente ga
+            INNER JOIN pagos_atribuibles pa
+                ON CAST(ga.cod_luna AS STRING) = pa.nro_documento
+                AND pa.fecha_pago >= ga.fecha_foto  -- Payment after management
+                AND pa.fecha_pago <= DATE_ADD(ga.fecha_foto, INTERVAL 7 DAY)  -- Within 7 days
             GROUP BY 1,2
         )
         
@@ -306,13 +369,15 @@ class ETLConfig:
             ga.hora,
             ga.correo_agente,
             ga.nombre_agente,
+            
+            -- Agent performance metrics
             COUNT(*) as total_gestiones,
             SUM(CASE WHEN ga.es_contacto_efectivo THEN 1 ELSE 0 END) as contactos_efectivos,
             SUM(CASE WHEN ga.es_compromiso THEN 1 ELSE 0 END) as total_pdp,
             SUM(ga.peso_gestion) as peso_total,
-            COALESCE(pa.monto_recuperado, 0) as monto_recuperado,  -- ✅ RECOVERY DATA
+            COALESCE(rpa.monto_recuperado, 0) as monto_recuperado,
             
-            -- Performance calculations
+            -- Performance ratios
             SAFE_DIVIDE(
                 SUM(CASE WHEN ga.es_contacto_efectivo THEN 1 ELSE 0 END),
                 COUNT(*)
@@ -326,9 +391,9 @@ class ETLConfig:
             CURRENT_TIMESTAMP() as fecha_procesamiento
             
         FROM gestiones_agente ga
-        LEFT JOIN pagos_por_agente pa
-            ON ga.fecha_foto = pa.fecha_pago
-            AND ga.correo_agente = pa.correo_agente
+        LEFT JOIN recupero_por_agente rpa
+            ON ga.fecha_foto = rpa.fecha_foto
+            AND ga.correo_agente = rpa.correo_agente
         GROUP BY 1,2,3,4,9  -- Include monto_recuperado in GROUP BY
         HAVING total_gestiones > 0
         ORDER BY fecha_foto DESC, hora, correo_agente
@@ -367,7 +432,13 @@ class ETLConfig:
         # Apply lookback window for data quality
         lookback_date = since_date - timedelta(days=config.lookback_days)
         
-        return f"{incremental_col} >= '{lookback_date.strftime('%Y-%m-%d')}'"
+        # Different filter logic based on table type
+        if config.table_type == TableType.ASSIGNMENT:
+            # Assignment uses assignment date, not management date
+            return f"fecha_asignacion_real >= '{lookback_date.strftime('%Y-%m-%d')}'"
+        else:
+            # Management tables use management/processing date
+            return f"{incremental_col} >= '{lookback_date.strftime('%Y-%m-%d')}'"
     
     @classmethod
     def list_tables(cls) -> List[str]:
