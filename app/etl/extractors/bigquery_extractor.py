@@ -44,9 +44,9 @@ class BigQueryExtractor(LoggerMixin):
         self.watermark_manager: Optional[WatermarkManager] = None
         
         # Performance settings
-        self.max_retries = ETLConfig.MAX_RETRY_ATTEMPTS
-        self.retry_delay = ETLConfig.RETRY_DELAY_SECONDS
-        self.default_timeout = 300  # 5 minutes default query timeout
+        self.max_retries: int = ETLConfig.MAX_RETRY_ATTEMPTS
+        self.retry_delay_seconds: int = ETLConfig.RETRY_DELAY_SECONDS
+        self.default_query_timeout_seconds: int = 300  # 5 minutes default query timeout
         
     async def _ensure_client(self) -> bigquery.Client:
         """Ensure BigQuery client is initialized"""
@@ -73,98 +73,144 @@ class BigQueryExtractor(LoggerMixin):
         config: ExtractionConfig,
         mode: ExtractionMode = ExtractionMode.INCREMENTAL,
         since_date: Optional[datetime] = None
-    ) -> str:
+    ) -> tuple[str, Optional[List[bigquery.ScalarQueryParameter]]]:
         """
-        Build query with incremental filter
+        Build query with incremental filter and prepares query parameters.
         
         Args:
-            base_query: Base SQL query with {incremental_filter} placeholder
-            config: Extraction configuration
-            mode: Extraction mode
-            since_date: Extract data since this date (if None, uses watermark)
+            base_query: Base SQL query with {incremental_filter} placeholder.
+            config: Extraction configuration.
+            mode: Extraction mode.
+            since_date: Extract data since this date (if None, uses watermark).
             
         Returns:
-            Complete SQL query with WHERE clause
+            A tuple containing the final SQL query string and a list of ScalarQueryParameter objects.
         """
+        query_params: Optional[List[bigquery.ScalarQueryParameter]] = None
+
         if mode == ExtractionMode.FULL_REFRESH:
-            # Full refresh - no filter
-            incremental_filter = "1=1"
+            incremental_filter_condition = "1=1"
         else:
-            if since_date is None:
-                # Use lookback from config for data quality
-                since_date = datetime.now(timezone.utc) - timedelta(days=config.lookback_days)
-            
-            # Build incremental filter
-            incremental_filter = ETLConfig.get_incremental_filter(
-                config.table_name, 
-                since_date
+            # Determine the actual since_date if not provided or if sliding window
+            if mode == ExtractionMode.SLIDING_WINDOW:
+                # For sliding window, since_date is effectively NOW, lookback is applied from NOW.
+                # The get_incremental_filter handles the date calculation for sliding window correctly.
+                # We pass datetime.now() so it calculates lookback from today.
+                filter_since_date = datetime.now(timezone.utc)
+            elif since_date is None:
+                # Default for INCREMENTAL: use lookback from config for data quality from today
+                filter_since_date = datetime.now(timezone.utc) - timedelta(days=config.lookback_days)
+            else:
+                filter_since_date = since_date
+
+            # Get filter condition template and parameters
+            condition_template, params_dict = ETLConfig.get_incremental_filter(
+                config.table_name,
+                filter_since_date, # Pass the determined since_date for filter calculation
+                mode=mode # Pass mode to get_incremental_filter
             )
+            incremental_filter_condition = condition_template
+
+            if params_dict:
+                query_params = []
+                for name, value in params_dict.items():
+                    # Determine BigQuery type. Assuming DATE for now.
+                    # This might need to be more sophisticated if other types are used.
+                    param_type = "DATE"
+                    # Convert Python date/datetime to string if BQ expects date string,
+                    # or pass directly if BQ client handles it. BQ client handles Python date/datetime.
+                    if isinstance(value, str): # If it's already a 'YYYY-MM-DD' string
+                        param_value = datetime.strptime(value, '%Y-%m-%d').date()
+                    elif isinstance(value, datetime):
+                        param_value = value.date()
+                    else: # Assumes value is already a date object
+                        param_value = value
+                    query_params.append(bigquery.ScalarQueryParameter(name, param_type, param_value))
         
         # Replace placeholder in query
-        final_query = base_query.replace("{incremental_filter}", incremental_filter)
+        final_query = base_query.replace("{incremental_filter}", incremental_filter_condition)
         
-        self.logger.debug(f"Generated query for {config.table_name}:\n{final_query}")
-        return final_query
+        self.logger.debug(f"Generated query for {config.table_name}: {final_query}, Params: {params_dict if mode != ExtractionMode.FULL_REFRESH else 'N/A'}")
+        return final_query, query_params
     
     async def _execute_query_streaming(
         self, 
         query: str, 
-        batch_size: int = 10000
+        batch_size: int = 10000,
+        query_params: Optional[List[bigquery.ScalarQueryParameter]] = None
     ) -> AsyncGenerator[List[Dict[str, Any]], None]:
         """
         Execute BigQuery query and yield results in batches
         
         Memory-efficient streaming approach for large datasets
+        Includes retry logic for transient errors.
         """
         client = await self._ensure_client()
         
-        try:
-            # Configure query job
-            job_config = bigquery.QueryJobConfig(
-                use_query_cache=True,
-                maximum_bytes_billed=10**10,  # 10GB limit for safety
-            )
-            
-            # Start query job
-            self.logger.info(f"Starting BigQuery job for batch size {batch_size}")
-            query_job = client.query(query, job_config=job_config)
-            
-            # Wait for job to complete with timeout
-            query_job.result(timeout=self.default_timeout)
-            
-            # Stream results in batches
-            total_rows = 0
-            batch_count = 0
-            
-            for batch in query_job.result(page_size=batch_size):
-                batch_data = []
-                for row in batch:
-                    # Convert BigQuery row to dict
-                    row_dict = dict(row)
-                    
-                    # Handle datetime serialization
-                    for key, value in row_dict.items():
-                        if isinstance(value, datetime):
-                            row_dict[key] = value.isoformat()
-                    
-                    batch_data.append(row_dict)
+        job_config = bigquery.QueryJobConfig(
+            use_query_cache=True,
+            maximum_bytes_billed=10**10,  # 10GB limit for safety
+        )
+        if query_params:
+            job_config.query_parameters = query_params
+
+        last_exception = None
+        for attempt in range(self.max_retries):
+            try:
+                self.logger.info(
+                    f"Attempt {attempt + 1}/{self.max_retries} - Starting BigQuery job. "
+                    f"Query: {query[:200]}... "
+                    f"Params: {[(p.name, p.value) for p in query_params or []]}"
+                )
+                query_job = client.query(query, job_config=job_config)
+                self.logger.info(f"BigQuery job initiated with ID: {query_job.job_id} (Attempt {attempt + 1})")
+
+                # Wait for job to complete with timeout
+                # result() can raise google.api_core.exceptions.GoogleAPICallError for job errors
+                iterator = query_job.result(timeout=self.default_query_timeout_seconds)
                 
-                if batch_data:
-                    total_rows += len(batch_data)
-                    batch_count += 1
+                # Stream results in batches
+                total_rows = 0
+                batch_count = 0
+
+                # query_job.result() returns an iterator directly if successful
+                for page in iterator.pages: # Iterate through pages for batching
+                    batch_data = []
+                    for row in page:
+                        row_dict = dict(row)
+                        for key, value in row_dict.items():
+                            if isinstance(value, datetime):
+                                row_dict[key] = value.isoformat()
+                        batch_data.append(row_dict)
                     
-                    self.logger.debug(f"Yielding batch {batch_count} with {len(batch_data)} rows")
-                    yield batch_data
-            
-            self.logger.info(f"Query completed: {total_rows} rows in {batch_count} batches")
-            
-        except GoogleCloudError as e:
-            self.logger.error(f"BigQuery error: {str(e)}")
-            raise
-        except Exception as e:
-            self.logger.error(f"Unexpected error in query execution: {str(e)}")
-            raise
-    
+                    if batch_data:
+                        total_rows += len(batch_data)
+                        batch_count += 1
+                        self.logger.debug(f"Yielding batch {batch_count} with {len(batch_data)} rows from job {query_job.job_id}")
+                        yield batch_data
+
+                self.logger.info(f"Query job {query_job.job_id} completed successfully: {total_rows} rows in {batch_count} batches")
+                return # Successful execution, exit retry loop
+
+            except (GoogleCloudError, asyncio.TimeoutError) as e: # Catch more specific transient errors if possible
+                last_exception = e
+                self.logger.warning(
+                    f"BigQuery job {getattr(query_job, 'job_id', 'N/A')} "
+                    f"failed on attempt {attempt + 1}/{self.max_retries}: {str(e)}"
+                )
+                if attempt < self.max_retries - 1:
+                    await asyncio.sleep(self.retry_delay_seconds * (2**attempt))  # Exponential backoff
+                else:
+                    self.logger.error(f"BigQuery job {getattr(query_job, 'job_id', 'N/A')} failed after {self.max_retries} attempts.")
+                    raise  # Re-raise the last exception after all retries fail
+            except Exception as e: # Catch other unexpected errors
+                self.logger.error(f"Unexpected error in query execution (job ID: {getattr(query_job, 'job_id', 'N/A')}): {str(e)}")
+                raise # Re-raise immediately for non-transient errors
+
+        # This part should ideally not be reached if logic is correct, but as a safeguard:
+        if last_exception:
+            raise last_exception
+
     async def extract_table_incremental(
         self, 
         table_name: str,
@@ -212,8 +258,8 @@ class BigQueryExtractor(LoggerMixin):
                     
                     since_date = last_extracted
             
-            # Build final query
-            final_query = self._build_incremental_query(
+            # Build final query and parameters
+            final_query, query_params = self._build_incremental_query(
                 base_query, config, mode, since_date
             )
             
@@ -227,8 +273,9 @@ class BigQueryExtractor(LoggerMixin):
             
             # Stream data in batches
             async for batch in self._execute_query_streaming(
-                final_query, 
-                config.batch_size
+                query=final_query,
+                batch_size=config.batch_size,
+                query_params=query_params
             ):
                 total_records += len(batch)
                 yield batch

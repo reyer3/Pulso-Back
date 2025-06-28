@@ -74,9 +74,19 @@ class WatermarkManager:
         """
         
         async with self.engine.begin() as conn:
-            await conn.execute(text(create_table_sql))
+            # Check if table exists first to provide a more informative log
+            check_exists_sql = "SELECT to_regclass('public.etl_watermarks');"
+            result = await conn.execute(text(check_exists_sql))
+            table_exists = result.scalar_one_or_none() is not None
+
+            if not table_exists:
+                await conn.execute(text(create_table_sql))
+                self.logger.info("Watermark table 'etl_watermarks' created successfully with indexes.")
+            else:
+                # Optionally, could verify schema/indexes here if needed for robustness
+                self.logger.info("Watermark table 'etl_watermarks' already exists.")
             
-        self.logger.info("Watermark table ensured")
+        self.logger.info("Watermark table ensured") # General message
     
     async def get_watermark(self, table_name: str) -> Optional[WatermarkInfo]:
         """Get current watermark for a table"""
@@ -204,8 +214,10 @@ class WatermarkManager:
             })
         
         self.logger.info(
-            f"Updated watermark for {table_name}: {timestamp} "
-            f"({records_extracted} records, {status})"
+            f"Updated watermark for table '{table_name}': "
+            f"Timestamp='{timestamp.isoformat()}', Status='{status}', "
+            f"Records={records_extracted}, Duration={extraction_duration_seconds:.2f}s, "
+            f"ExtractionID='{extraction_id}', Error='{error_message if error_message else 'None'}'"
         )
     
     async def get_failed_extractions(self) -> List[WatermarkInfo]:

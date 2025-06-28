@@ -49,8 +49,7 @@ class ExtractionConfig:
     batch_size: int = 10000  # Records per batch
     
     # BigQuery specific
-    source_dataset: str = "BI_USA"
-    source_view: Optional[str] = None
+    source_view_suffix: Optional[str] = None  # e.g., "dashboard_cobranzas" not the full BQ path
     
     # Quality checks
     required_columns: List[str] = None
@@ -86,7 +85,7 @@ class ETLConfig:
             description="Main dashboard metrics - Assignment-based with Management overlay",
             primary_key=["fecha_foto", "archivo", "cartera", "servicio"],
             incremental_column="fecha_foto",
-            source_view=f"{VIEW_PREFIX}_dashboard_cobranzas",
+            source_view_suffix="dashboard_cobranzas",
             lookback_days=7,
             required_columns=[
                 "fecha_foto", "archivo", "cartera", "servicio", 
@@ -102,7 +101,7 @@ class ETLConfig:
             description="Time series data for trending charts",
             primary_key=["fecha_foto", "archivo"],
             incremental_column="fecha_foto",
-            source_view=f"{VIEW_PREFIX}_dashboard_cobranzas",
+            source_view_suffix="dashboard_cobranzas",
             lookback_days=3,
             batch_size=50000,
             required_columns=["fecha_foto", "archivo", "pct_cober", "pct_contac", "pct_efectividad"],
@@ -116,7 +115,7 @@ class ETLConfig:
             description="Assignment analysis - from Calendar + Asignaciones + Cuentas",
             primary_key=["periodo", "archivo", "cartera"],
             incremental_column="fecha_asignacion_real",  # From assignment, not management
-            source_view=f"{VIEW_PREFIX}_asignaciones_clean",
+            source_view_suffix="asignaciones_clean",
             lookback_days=30,
             refresh_frequency_hours=24,
             required_columns=["periodo", "archivo", "cartera", "cuentas", "clientes", "deuda_asig"],
@@ -130,7 +129,7 @@ class ETLConfig:
             description="Hourly operational metrics - Management actions only",
             primary_key=["fecha_foto", "hora", "canal", "cola"],
             incremental_column="fecha_foto",
-            source_view=f"{VIEW_PREFIX}_gestiones_unificadas",
+            source_view_suffix="gestiones_unificadas",
             lookback_days=2,
             batch_size=5000,
             refresh_frequency_hours=2,
@@ -146,7 +145,7 @@ class ETLConfig:
             description="Agent productivity - Management performance only",
             primary_key=["fecha_foto", "correo_agente", "hora"],
             incremental_column="fecha_foto",
-            source_view=f"{VIEW_PREFIX}_gestiones_unificadas",
+            source_view_suffix="gestiones_unificadas",
             lookback_days=5,
             refresh_frequency_hours=8,
             required_columns=["fecha_foto", "correo_agente", "nombre_agente", "total_gestiones"],
@@ -160,6 +159,8 @@ class ETLConfig:
     RETRY_DELAY_SECONDS = 30
     
     # 🎯 EXTRACTION QUERIES - CORRECTED BUSINESS LOGIC
+    # These queries use class-level constants for project, dataset, and view prefix.
+    # The specific view suffix is part of the string literal.
     EXTRACTION_QUERIES: Dict[str, str] = {
         
         "dashboard_data": f"""
@@ -189,7 +190,7 @@ class ETLConfig:
             pct_cierre,
             inten,
             CURRENT_TIMESTAMP() as fecha_procesamiento
-        FROM `{PROJECT_ID}.{DATASET}.{VIEW_PREFIX}_dashboard_cobranzas`
+        FROM `{PROJECT_ID}.{DATASET}.{VIEW_PREFIX}_dashboard_cobranzas` -- Uses ExtractionConfig.source_view_suffix = "dashboard_cobranzas"
         WHERE {{incremental_filter}}
         ORDER BY fecha_foto DESC, archivo, cartera, servicio
         """,
@@ -208,7 +209,7 @@ class ETLConfig:
             recupero,
             cuentas,
             CURRENT_TIMESTAMP() as fecha_procesamiento
-        FROM `{PROJECT_ID}.{DATASET}.{VIEW_PREFIX}_dashboard_cobranzas`
+        FROM `{PROJECT_ID}.{DATASET}.{VIEW_PREFIX}_dashboard_cobranzas` -- Uses ExtractionConfig.source_view_suffix = "dashboard_cobranzas"
         WHERE {{incremental_filter}}
         ORDER BY fecha_foto DESC, archivo
         """,
@@ -228,7 +229,7 @@ class ETLConfig:
                 ac.estado_deudor,
                 EXTRACT(YEAR FROM ac.fecha_asignacion_real) as anno,
                 FORMAT_DATE('%Y-%m', ac.fecha_asignacion_real) as periodo
-            FROM `{PROJECT_ID}.{DATASET}.{VIEW_PREFIX}_asignaciones_clean` ac
+            FROM `{PROJECT_ID}.{DATASET}.{VIEW_PREFIX}_asignaciones_clean` -- Uses ExtractionConfig.source_view_suffix = "asignaciones_clean"
             WHERE {{incremental_filter}}
         ),
         
@@ -236,7 +237,7 @@ class ETLConfig:
             SELECT 
                 p.nro_documento,
                 SUM(p.monto_cancelado) as monto_recuperado
-            FROM `{PROJECT_ID}.{DATASET}.{VIEW_PREFIX}_pagos_unicos` p
+            FROM `{PROJECT_ID}.{DATASET}.{VIEW_PREFIX}_pagos_unicos` -- This is a fixed view, not from config per table
             WHERE p.fecha_pago >= DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY)
             GROUP BY p.nro_documento
         )
@@ -288,7 +289,7 @@ class ETLConfig:
                     PARTITION BY g.cod_luna, DATE(g.timestamp_gestion) 
                     ORDER BY g.timestamp_gestion
                 ) as numero_intento
-            FROM `{PROJECT_ID}.{DATASET}.{VIEW_PREFIX}_gestiones_unificadas` g
+            FROM `{PROJECT_ID}.{DATASET}.{VIEW_PREFIX}_gestiones_unificadas` -- Uses ExtractionConfig.source_view_suffix = "gestiones_unificadas"
             WHERE {{incremental_filter}}
         )
         
@@ -334,7 +335,7 @@ class ETLConfig:
                 g.es_contacto_efectivo,
                 g.es_compromiso,
                 g.peso_gestion
-            FROM `{PROJECT_ID}.{DATASET}.{VIEW_PREFIX}_gestiones_unificadas` g
+            FROM `{PROJECT_ID}.{DATASET}.{VIEW_PREFIX}_gestiones_unificadas` -- Uses ExtractionConfig.source_view_suffix = "gestiones_unificadas"
             WHERE {{incremental_filter}}
               AND g.correo_agente IS NOT NULL
         ),
@@ -345,7 +346,7 @@ class ETLConfig:
                 p.fecha_pago,
                 p.nro_documento,
                 SUM(p.monto_cancelado) as monto_recuperado
-            FROM `{PROJECT_ID}.{DATASET}.{VIEW_PREFIX}_pagos_unicos` p
+            FROM `{PROJECT_ID}.{DATASET}.{VIEW_PREFIX}_pagos_unicos` -- This is a fixed view, not from config per table
             WHERE p.fecha_pago >= DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY)
             GROUP BY 1,2
         ),
@@ -406,12 +407,25 @@ class ETLConfig:
         if table_name not in cls.EXTRACTION_CONFIGS:
             raise ValueError(f"No configuration found for table: {table_name}")
         return cls.EXTRACTION_CONFIGS[table_name]
-    
+
+    @classmethod
+    def get_full_view_name(cls, table_name: str) -> Optional[str]:
+        """Constructs the full BigQuery view name."""
+        config = cls.get_config(table_name)
+        if not config.source_view_suffix:
+            return None
+        return f"{cls.PROJECT_ID}.{cls.DATASET}.{cls.VIEW_PREFIX}_{config.source_view_suffix}"
+
     @classmethod
     def get_query(cls, table_name: str) -> str:
-        """Get extraction query for a specific table"""
+        """Get extraction query for a specific table, formatted with the full view name."""
         if table_name not in cls.EXTRACTION_QUERIES:
             raise ValueError(f"No query found for table: {table_name}")
+
+        # The base queries still use placeholders like `{PROJECT_ID}.{DATASET}.{VIEW_PREFIX}_dashboard_cobranzas`
+        # This is fine as they are class-level constants.
+        # If specific views were needed per table config, we'd format the query string here.
+        # For now, the queries are already pre-formatted with the global view prefixes.
         return cls.EXTRACTION_QUERIES[table_name]
     
     @classmethod
@@ -432,13 +446,33 @@ class ETLConfig:
         # Apply lookback window for data quality
         lookback_date = since_date - timedelta(days=config.lookback_days)
         
-        # Different filter logic based on table type
-        if config.table_type == TableType.ASSIGNMENT:
-            # Assignment uses assignment date, not management date
-            return f"fecha_asignacion_real >= '{lookback_date.strftime('%Y-%m-%d')}'"
+        # Determine the correct date for filtering based on mode
+        if mode == ExtractionMode.SLIDING_WINDOW:
+            # Sliding window always looks back from the current date, ignoring watermarks
+            effective_since_date = datetime.now(timezone.utc) - timedelta(days=config.lookback_days)
+            # For sliding window, the filter is based on the lookback from now.
+            # The incremental_column is still used.
+            filter_date_str = effective_since_date.strftime('%Y-%m-%d')
+            # Log this specific behavior for clarity
+            # self.logger.info(f"Sliding window mode for {table_name}: filtering {incremental_col} >= '{filter_date_str}'")
+
+        elif mode == ExtractionMode.FULL_REFRESH:
+            return "1=1" # No date filter for full refresh
+
+        else: # INCREMENTAL mode (default)
+            # Incremental mode uses the lookback_date calculated from since_date (which could be a watermark)
+            filter_date_str = lookback_date.strftime('%Y-%m-%d')
+
+        # Apply filter logic based on table type for date column name
+        param_name = "filter_date"
+        if config.table_type == TableType.ASSIGNMENT and incremental_col == "fecha_asignacion_real":
+            # Assignment table uses its specific assignment date column for incremental logic
+            condition = f"fecha_asignacion_real >= @{param_name}"
         else:
-            # Management tables use management/processing date
-            return f"{incremental_col} >= '{lookback_date.strftime('%Y-%m-%d')}'"
+            # Other tables use their configured incremental_column
+            condition = f"{incremental_col} >= @{param_name}"
+
+        return condition, {param_name: filter_date_str} # Return condition template and params
     
     @classmethod
     def list_tables(cls) -> List[str]:
@@ -462,8 +496,11 @@ ALL_TABLES = ETLConfig.list_tables()
 DEFAULT_CONFIG = ExtractionConfig(
     table_name="default",
     table_type=TableType.DASHBOARD,
-    description="Default configuration",
+    description="Default configuration template, not actively used by automated ETL runs unless explicitly called.",
+    table_name="default_template", # Renamed to avoid confusion
+    table_type=TableType.DASHBOARD,
     primary_key=["id"],
     incremental_column="updated_at",
-    lookback_days=1
+    lookback_days=1,
+    source_view_suffix=None # Explicitly no view for a template
 )

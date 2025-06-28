@@ -81,89 +81,41 @@ class PostgresLoader(LoggerMixin):
         """Extract primary key column names from SQLAlchemy model"""
         return [col.name for col in model_class.__table__.primary_key.columns]
     
-    def _build_upsert_statement(
-        self, 
-        model_class: Type[Base], 
-        data_batch: List[Dict[str, Any]]
-    ) -> str:
-        """
-        Build PostgreSQL UPSERT statement using ON CONFLICT DO UPDATE
-        
-        Args:
-            model_class: SQLAlchemy model class
-            data_batch: List of data dictionaries
-            
-        Returns:
-            PostgreSQL UPSERT statement
-        """
-        if not data_batch:
-            raise ValueError("Data batch cannot be empty")
-        
-        table_name = model_class.__tablename__
-        primary_key_cols = self._get_primary_key_columns(model_class)
-        
-        # Get all columns from the first record
-        all_columns = list(data_batch[0].keys())
-        
-        # Prepare column lists
-        columns_str = ", ".join(all_columns)
-        conflict_columns_str = ", ".join(primary_key_cols)
-        
-        # Build SET clause for UPDATE (exclude primary key columns and metadata)
-        update_columns = [
-            col for col in all_columns 
-            if col not in primary_key_cols 
-            and col not in ['created_at', 'updated_at', 'fecha_procesamiento']
-        ]
-        
-        set_clause = ", ".join([f"{col} = EXCLUDED.{col}" for col in update_columns])
-        
-        # Add metadata update
-        set_clause += ", updated_at = CURRENT_TIMESTAMP"
-        
-        # Build VALUES clause
-        values_placeholder = ", ".join([
-            f"({', '.join([f':{col}_{i}' for col in all_columns])})"
-            for i in range(len(data_batch))
-        ])
-        
-        upsert_sql = f"""
-        INSERT INTO {table_name} ({columns_str})
-        VALUES {values_placeholder}
-        ON CONFLICT ({conflict_columns_str})
-        DO UPDATE SET {set_clause}
-        """
-        
-        return upsert_sql
-    
-    def _prepare_batch_parameters(
-        self, 
-        data_batch: List[Dict[str, Any]]
-    ) -> Dict[str, Any]:
-        """
-        Prepare parameters for batch UPSERT operation
-        
-        Args:
-            data_batch: List of data dictionaries
-            
-        Returns:
-            Flattened parameter dictionary for SQL execution
-        """
-        params = {}
-        
-        for i, record in enumerate(data_batch):
-            for col, value in record.items():
-                # Handle datetime serialization
-                if isinstance(value, str) and 'T' in value:
-                    try:
-                        value = datetime.fromisoformat(value.replace('Z', '+00:00'))
-                    except ValueError:
-                        pass  # Keep as string if not valid datetime
-                
-                params[f"{col}_{i}"] = value
-        
-        return params
-    
+    def _parse_datetime_fields(self, record: Dict[str, Any], model_class: Type[Base]) -> Dict[str, Any]:
+        """Ensure datetime fields are Python datetime objects."""
+        parsed_record = record.copy()
+        for column in model_class.__table__.columns:
+            col_name = column.name
+            if col_name in parsed_record:
+                value = parsed_record[col_name]
+                # Check if the column is a DateTime, Date, or Time type in SQLAlchemy
+                if isinstance(column.type, (sqltypes.DateTime, sqltypes.Date, sqltypes.Time)):
+                    if isinstance(value, str):
+                        try:
+                            # Handle ISO format strings (common from BigQuery extractor)
+                            if 'T' in value and ('Z'in value or '+' in value or '-' in value.split('T')[-1]):
+                                dt_value = datetime.fromisoformat(value.replace('Z', '+00:00'))
+                                if isinstance(column.type, sqltypes.Date):
+                                    parsed_record[col_name] = dt_value.date()
+                                elif isinstance(column.type, sqltypes.Time):
+                                    parsed_record[col_name] = dt_value.time()
+                                else: # DateTime
+                                    # Ensure timezone-aware if model expects it, or naive if not
+                                    if column.type.timezone:
+                                        parsed_record[col_name] = dt_value.astimezone(timezone.utc) if dt_value.tzinfo is None else dt_value
+                                    else:
+                                        parsed_record[col_name] = dt_value.replace(tzinfo=None)
+                            # Handle YYYY-MM-DD for date fields
+                            elif isinstance(column.type, sqltypes.Date) and re.match(r'^\d{4}-\d{2}-\d{2}$', value):
+                                parsed_record[col_name] = datetime.strptime(value, '%Y-%m-%d').date()
+                        except ValueError:
+                            self.logger.warning(f"Could not parse string '{value}' for datetime column '{col_name}'. Keeping original.")
+                    elif isinstance(value, date) and not isinstance(value, datetime) and isinstance(column.type, sqltypes.DateTime):
+                         # If model expects DateTime but gets Date, convert to midnight DateTime UTC
+                        parsed_record[col_name] = datetime(value.year, value.month, value.day, tzinfo=timezone.utc)
+
+        return parsed_record
+
     def _validate_data_batch(
         self, 
         data: List[Dict[str, Any]], 
@@ -187,34 +139,40 @@ class PostgresLoader(LoggerMixin):
         
         for i, record in enumerate(data):
             try:
+                # Ensure datetime fields are actual datetime objects
+                # This is important for SQLAlchemy to handle them correctly.
+                record_with_pydt = self._parse_datetime_fields(record, model_class)
+
                 # Check primary key values are not null
+                valid_pk = True
                 for pk_col in primary_key_cols:
-                    if pk_col not in record or record[pk_col] is None:
+                    if pk_col not in record_with_pydt or record_with_pydt[pk_col] is None:
                         self.logger.warning(
-                            f"Record {i} has null primary key value for: {pk_col}"
+                            f"Record {i} has null primary key value for: {pk_col}. Skipping. Record: {record_with_pydt}"
                         )
-                        continue
+                        valid_pk = False
+                        break
+                if not valid_pk:
+                    self.transformation_stats['records_skipped'] += 1
+                    continue
                 
-                # Clean the record
-                cleaned_record = {}
-                for key, value in record.items():
-                    # Handle datetime strings
-                    if isinstance(value, str) and 'T' in value and ('Z' in value or '+' in value):
-                        try:
-                            cleaned_record[key] = datetime.fromisoformat(value.replace('Z', '+00:00'))
-                        except ValueError:
-                            cleaned_record[key] = value
-                    else:
-                        cleaned_record[key] = value
+                # Add processing timestamp if not present and if model has the column
+                if 'fecha_procesamiento' in model_class.__table__.columns and 'fecha_procesamiento' not in record_with_pydt:
+                    record_with_pydt['fecha_procesamiento'] = datetime.now(timezone.utc)
                 
-                # Add processing timestamp if not present
-                if 'fecha_procesamiento' not in cleaned_record:
-                    cleaned_record['fecha_procesamiento'] = datetime.now(timezone.utc)
-                
-                validated_data.append(cleaned_record)
+                # Ensure 'created_at' and 'updated_at' are not set by client if model handles them
+                # Or ensure they are valid datetimes if client is supposed to set them (less common for these fields)
+                # For now, assume model default or DB default handles created_at. updated_at handled by UPSERT.
+                if 'created_at' in record_with_pydt and 'created_at' not in model_class.__table__.columns:
+                    del record_with_pydt['created_at']
+                if 'updated_at' in record_with_pydt and 'updated_at' not in model_class.__table__.columns:
+                    del record_with_pydt['updated_at']
+
+                validated_data.append(record_with_pydt)
                 
             except Exception as e:
-                self.logger.warning(f"Error validating record {i}: {str(e)}")
+                self.logger.warning(f"Error validating record {i}: {str(e)}. Record: {record}")
+                self.transformation_stats['records_skipped'] += 1
                 continue
         
         self.logger.info(
@@ -278,44 +236,61 @@ class PostgresLoader(LoggerMixin):
                     error_message="No valid records to load"
                 )
             
-            # Process in batches
-            total_processed = 0
+            # Process in batches using SQLAlchemy 2.0 style bulk operations
+            total_records_in_batch = len(data)
+            processed_count = 0
             
             async with self.async_session_factory() as session:
-                # Split data into batches
-                for i in range(0, len(data), self.max_batch_size):
-                    batch = data[i:i + self.max_batch_size]
-                    
+                async with session.begin(): # Ensure transaction block
                     if upsert:
-                        # Use raw SQL UPSERT for better performance
-                        upsert_sql = self._build_upsert_statement(model_class, batch)
-                        params = self._prepare_batch_parameters(batch)
+                        # Prepare for PostgreSQL ON CONFLICT DO UPDATE
+                        primary_key_cols = self._get_primary_key_columns(model_class)
+                        if not primary_key_cols:
+                            raise ValueError(f"No primary key defined for model {model_class.__name__}, UPSERT impossible.")
+
+                        stmt = insert(model_class).values(data)
                         
-                        result = await session.execute(text(upsert_sql), params)
-                        total_processed += len(batch)
-                        
-                    else:
-                        # Use ORM bulk insert
-                        objects = [model_class(**record) for record in batch]
-                        session.add_all(objects)
-                        total_processed += len(objects)
-                
-                # Commit all changes
-                await session.commit()
+                        # Columns to update, excluding primary keys and created_at
+                        update_cols = {
+                            c.name: c
+                            for c in stmt.excluded if c.name not in primary_key_cols and c.name != 'created_at'
+                        }
+                        # Ensure 'updated_at' is set if the model has it
+                        if 'updated_at' in model_class.__table__.columns:
+                            update_cols['updated_at'] = datetime.now(timezone.utc)
+
+                        # ON CONFLICT DO UPDATE SET (col1=excluded.col1, ...)
+                        stmt = stmt.on_conflict_do_update(
+                            index_elements=primary_key_cols,
+                            set_=update_cols
+                        )
+                        result = await session.execute(stmt)
+                        processed_count = result.rowcount # rowcount for UPSERT indicates affected rows
+
+                    else: # Plain bulk insert
+                        # For plain inserts, SQLAlchemy 2.0 style is session.execute(insert(Model).values(data_list))
+                        # However, the `data` here is already a list of dicts.
+                        # The insert().values() can take a list of dicts directly.
+                        stmt = insert(model_class).values(data)
+                        result = await session.execute(stmt)
+                        processed_count = result.rowcount # rowcount for INSERT indicates inserted rows
             
             duration = time.time() - start_time
             
             self.logger.info(
-                f"Loaded {table_name}: {total_processed} records "
-                f"in {duration:.2f}s (UPSERT: {upsert})"
+                f"Loaded {table_name}: {processed_count} records processed "
+                f"(out of {total_records_in_batch} valid records) in {duration:.2f}s (UPSERT: {upsert})"
             )
             
+            # Note: Distinguishing between truly inserted vs updated in a single UPSERT batch
+            # can be complex without further RETURNING clauses and processing.
+            # For now, inserted_records will reflect processed_count, and updated_records will be 0.
             return LoadResult(
                 table_name=table_name,
-                total_records=len(data),
-                inserted_records=total_processed,  # TODO: Distinguish INSERT vs UPDATE
-                updated_records=0,
-                skipped_records=len(data) - total_processed,
+                total_records=total_records_in_batch, # Number of records attempted in this batch
+                inserted_records=processed_count,
+                updated_records=0, # Simplified for now
+                skipped_records=total_records_in_batch - processed_count, # if rowcount is less than batch size
                 load_duration_seconds=duration,
                 status="success"
             )

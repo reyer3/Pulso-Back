@@ -65,22 +65,23 @@ class PipelineResult:
             "status": self.status,
             "tables_processed": self.tables_processed,
             "tables_failed": self.tables_failed,
-            "total_records_processed": self.total_records_processed,
-            "total_records_transformed": self.total_records_transformed,
-            "transformation_stats": self.transformation_stats,
-            "load_results": {
+            "total_records_source_processed_by_transformer": self.total_records_processed, # Records transformer attempted
+            "total_records_transformed_successfully": self.total_records_transformed,   # Records output by transformer
+            "detailed_transformation_stats_per_table": self.transformation_stats, # Transformer's own detailed stats
+            "detailed_load_results_per_table": {
                 table: {
-                    "total_records": result.total_records,
-                    "inserted_records": result.inserted_records,
-                    "updated_records": result.updated_records,
-                    "skipped_records": result.skipped_records,
+                    "attempted_to_load": result.total_records, # Records received by loader
+                    "loaded_successfully": result.inserted_records, # Records successfully upserted/inserted by loader
+                    # updated_records is currently simplified in loader, might be 0
+                    "updated_records_in_load": result.updated_records,
+                    "skipped_by_loader": result.skipped_records, # Records loader skipped (e.g. PK null after transformation)
                     "load_duration_seconds": result.load_duration_seconds,
-                    "status": result.status,
-                    "error_message": result.error_message
+                    "load_status": result.status,
+                    "load_error_message": result.error_message
                 }
                 for table, result in self.load_results.items()
             },
-            "error_message": self.error_message,
+            "global_error_message": self.error_message,
             "metadata": self.metadata
         }
 
@@ -180,8 +181,10 @@ class ETLPipeline(LoggerMixin):
         
         config = ETLConfig.get_config(table_name)
         
+        log_prefix = f"[Pipeline: {pipeline_result.pipeline_id if pipeline_result else 'N/A'}] " if pipeline_result else ""
+
         self.logger.info(
-            f"Starting ETL for {table_name} "
+            f"{log_prefix}Starting ETL for table: {table_name} "
             f"(mode: {mode}, force: {force})"
         )
         
@@ -214,26 +217,29 @@ class ETLPipeline(LoggerMixin):
             if pipeline_result:
                 pipeline_result.load_results[table_name] = load_result
                 pipeline_result.transformation_stats[table_name] = transformation_stats
-                pipeline_result.total_records_processed += load_result.total_records
+                # total_records_processed sums records that entered the transformation stage for this table
+                pipeline_result.total_records_processed += transformation_stats.get('records_processed', 0)
+                # total_records_transformed sums records successfully output by the transformer for this table
                 pipeline_result.total_records_transformed += transformation_stats.get('records_transformed', 0)
                 
-                if load_result.status == "success":
+                if load_result.status == "success" or load_result.status == "partial_success": # Consider partial success of load as table processed
                     pipeline_result.tables_processed.append(table_name)
                 else:
                     pipeline_result.tables_failed.append(table_name)
             
             self.logger.info(
-                f"Completed ETL for {table_name}: "
-                f"{transformation_stats.get('records_processed', 0)} extracted → "
+                f"{log_prefix}Completed ETL for table: {table_name}: "
+                f"{transformation_stats.get('records_processed', 0)} from source → "
                 f"{transformation_stats.get('records_transformed', 0)} transformed → "
-                f"{load_result.total_records} loaded ({load_result.status})"
+                f"{load_result.inserted_records} loaded. Status: {load_result.status}. " # Using inserted_records from LoadResult
+                f"Transformer skipped: {transformation_stats.get('records_skipped',0)}. Loader skipped: {load_result.skipped_records}."
             )
             
             return load_result
             
         except Exception as e:
-            error_msg = f"Failed ETL for {table_name}: {str(e)}"
-            self.logger.error(error_msg)
+            error_msg = f"{log_prefix}Failed ETL for table: {table_name}: {str(e)}"
+            self.logger.error(error_msg, exc_info=True)
             
             # Create error result
             load_result = LoadResult(

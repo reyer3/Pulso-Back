@@ -55,6 +55,10 @@ class DataTransformer(LoggerMixin):
                 # Clean and validate required fields
                 if not self._validate_dashboard_record(record):
                     self.transformation_stats['records_skipped'] += 1
+                    # Log the skipped record and reason (reason is in self.validation_errors)
+                    self.logger.warning(
+                        f"Skipping dashboard record due to validation errors: {self.validation_errors[-1]}. Record: {str(record)[:200]}..."
+                    )
                     continue
                 
                 # Transform record
@@ -141,6 +145,9 @@ class DataTransformer(LoggerMixin):
                 # Validation
                 if not transformed['fecha_foto'] or not transformed['archivo']:
                     self.transformation_stats['records_skipped'] += 1
+                    self.logger.warning(
+                        f"Skipping evolution record due to missing 'fecha_foto' or 'archivo'. Record: {str(record)[:200]}..."
+                    )
                     continue
                 
                 transformed_records.append(transformed)
@@ -186,6 +193,9 @@ class DataTransformer(LoggerMixin):
                 # Validation
                 if not transformed['periodo'] or not transformed['archivo']:
                     self.transformation_stats['records_skipped'] += 1
+                    self.logger.warning(
+                        f"Skipping assignment record due to missing 'periodo' or 'archivo'. Record: {str(record)[:200]}..."
+                    )
                     continue
                 
                 transformed_records.append(transformed)
@@ -236,6 +246,9 @@ class DataTransformer(LoggerMixin):
                 # Validation
                 if not transformed['fecha_foto'] or transformed['hora'] < 0 or transformed['hora'] > 23:
                     self.transformation_stats['records_skipped'] += 1
+                    self.logger.warning(
+                        f"Skipping operation record due to missing/invalid 'fecha_foto' or 'hora'. Record: {str(record)[:200]}..."
+                    )
                     continue
                 
                 transformed_records.append(transformed)
@@ -292,6 +305,9 @@ class DataTransformer(LoggerMixin):
                 # Validation
                 if not transformed['fecha_foto'] or not correo_agente:
                     self.transformation_stats['records_skipped'] += 1
+                    self.logger.warning(
+                        f"Skipping productivity record due to missing 'fecha_foto' or 'correo_agente'. Record: {str(record)[:200]}..."
+                    )
                     continue
                 
                 transformed_records.append(transformed)
@@ -546,8 +562,13 @@ class DataTransformer(LoggerMixin):
         return record
     
     def get_transformation_stats(self) -> Dict[str, Any]:
-        """Get transformation statistics"""
-        return self.transformation_stats.copy()
+        """Get transformation statistics, including a sample of validation errors."""
+        stats = self.transformation_stats.copy()
+        # Get unique validation errors, up to a certain limit
+        unique_errors = list(set(self.validation_errors))
+        stats['validation_error_samples'] = unique_errors[:min(len(unique_errors), 5)] # Sample up to 5 unique errors
+        stats['total_unique_validation_errors'] = len(unique_errors)
+        return stats
     
     def reset_stats(self):
         """Reset transformation statistics"""
