@@ -1,8 +1,9 @@
 """
-🎯 Production PostgreSQL Loader with UPSERT Support
-Intelligent incremental loading with conflict resolution
+🎯 Production PostgreSQL Loader with SQLAlchemy Models
+Intelligent incremental loading using TimescaleDB schema models
 
 Features:
+- SQLAlchemy ORM integration with TimescaleDB models
 - Dynamic UPSERT based on configurable primary keys
 - Batch processing for optimal performance
 - Data validation and quality checks
@@ -12,17 +13,28 @@ Features:
 import asyncio
 import time
 from datetime import datetime, timezone
-from typing import List, Dict, Any, Optional, Union
+from typing import List, Dict, Any, Optional, Union, Type
 import logging
 from dataclasses import dataclass
 
 import asyncpg
-from sqlalchemy.ext.asyncio import AsyncEngine
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
+from sqlalchemy.orm import sessionmaker
 from sqlalchemy import text
+from sqlalchemy.dialects.postgresql import insert
 
 from app.etl.config import ETLConfig, ExtractionConfig
 from app.core.database import get_postgres_engine
 from app.core.logging import LoggerMixin
+from app.models.database import (
+    TABLE_MODEL_MAPPING,
+    DashboardDataModel,
+    EvolutionDataModel,
+    AssignmentDataModel,
+    OperationDataModel,
+    ProductivityDataModel,
+    Base
+)
 
 
 @dataclass
@@ -40,89 +52,129 @@ class LoadResult:
 
 class PostgresLoader(LoggerMixin):
     """
-    Production-ready PostgreSQL loader with UPSERT capabilities
+    Production-ready PostgreSQL loader with SQLAlchemy ORM integration
     
     Features:
-    - Dynamic UPSERT based on primary key configuration
-    - Efficient batch processing
-    - Data type inference and conversion
-    - Transaction management with rollback
-    - Detailed load statistics
+    - SQLAlchemy models for type safety and validation
+    - PostgreSQL UPSERT using ON CONFLICT DO UPDATE
+    - Efficient batch processing with ORM
+    - TimescaleDB hypertable optimization
+    - Detailed load statistics and error tracking
     """
     
     def __init__(self, engine: Optional[AsyncEngine] = None):
         super().__init__()
         self.engine = engine or get_postgres_engine()
-        self.max_batch_size = 5000  # Default batch size
+        self.async_session_factory = sessionmaker(
+            self.engine, class_=AsyncSession, expire_on_commit=False
+        )
+        self.max_batch_size = 1000  # Smaller batches for ORM operations
         self.connection_timeout = 30
     
-    def _build_upsert_sql(
+    def _get_model_class(self, table_name: str) -> Type[Base]:
+        """Get SQLAlchemy model class for table"""
+        if table_name not in TABLE_MODEL_MAPPING:
+            raise ValueError(f"No model mapping found for table: {table_name}")
+        return TABLE_MODEL_MAPPING[table_name]
+    
+    def _get_primary_key_columns(self, model_class: Type[Base]) -> List[str]:
+        """Extract primary key column names from SQLAlchemy model"""
+        return [col.name for col in model_class.__table__.primary_key.columns]
+    
+    def _build_upsert_statement(
         self, 
-        table_name: str, 
-        columns: List[str], 
-        primary_key: List[str],
-        on_conflict_action: str = "UPDATE"
+        model_class: Type[Base], 
+        data_batch: List[Dict[str, Any]]
     ) -> str:
         """
-        Build dynamic UPSERT SQL statement
+        Build PostgreSQL UPSERT statement using ON CONFLICT DO UPDATE
         
         Args:
-            table_name: Target table name
-            columns: List of column names
-            primary_key: List of primary key columns
-            on_conflict_action: 'UPDATE', 'IGNORE', or 'ERROR'
+            model_class: SQLAlchemy model class
+            data_batch: List of data dictionaries
             
         Returns:
-            Complete UPSERT SQL statement
+            PostgreSQL UPSERT statement
         """
-        if not primary_key:
-            # No primary key - use simple INSERT
-            placeholders = ", ".join([f":{col}" for col in columns])
-            return f"""
-            INSERT INTO {table_name} ({", ".join(columns)})
-            VALUES ({placeholders})
-            """
+        if not data_batch:
+            raise ValueError("Data batch cannot be empty")
         
-        # Build UPSERT with ON CONFLICT
-        placeholders = ", ".join([f":{col}" for col in columns])
-        pk_columns = ", ".join(primary_key)
+        table_name = model_class.__tablename__
+        primary_key_cols = self._get_primary_key_columns(model_class)
         
-        if on_conflict_action == "UPDATE":
-            # Build SET clause for update (exclude primary key columns)
-            update_columns = [col for col in columns if col not in primary_key]
-            set_clause = ", ".join([f"{col} = EXCLUDED.{col}" for col in update_columns])
-            
-            upsert_sql = f"""
-            INSERT INTO {table_name} ({", ".join(columns)})
-            VALUES ({placeholders})
-            ON CONFLICT ({pk_columns})
-            DO UPDATE SET {set_clause}
-            """
-        elif on_conflict_action == "IGNORE":
-            upsert_sql = f"""
-            INSERT INTO {table_name} ({", ".join(columns)})
-            VALUES ({placeholders})
-            ON CONFLICT ({pk_columns}) DO NOTHING
-            """
-        else:  # ERROR
-            upsert_sql = f"""
-            INSERT INTO {table_name} ({", ".join(columns)})
-            VALUES ({placeholders})
-            """
+        # Get all columns from the first record
+        all_columns = list(data_batch[0].keys())
+        
+        # Prepare column lists
+        columns_str = ", ".join(all_columns)
+        conflict_columns_str = ", ".join(primary_key_cols)
+        
+        # Build SET clause for UPDATE (exclude primary key columns and metadata)
+        update_columns = [
+            col for col in all_columns 
+            if col not in primary_key_cols 
+            and col not in ['created_at', 'updated_at', 'fecha_procesamiento']
+        ]
+        
+        set_clause = ", ".join([f"{col} = EXCLUDED.{col}" for col in update_columns])
+        
+        # Add metadata update
+        set_clause += ", updated_at = CURRENT_TIMESTAMP"
+        
+        # Build VALUES clause
+        values_placeholder = ", ".join([
+            f"({', '.join([f':{col}_{i}' for col in all_columns])})"
+            for i in range(len(data_batch))
+        ])
+        
+        upsert_sql = f"""
+        INSERT INTO {table_name} ({columns_str})
+        VALUES {values_placeholder}
+        ON CONFLICT ({conflict_columns_str})
+        DO UPDATE SET {set_clause}
+        """
         
         return upsert_sql
+    
+    def _prepare_batch_parameters(
+        self, 
+        data_batch: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """
+        Prepare parameters for batch UPSERT operation
+        
+        Args:
+            data_batch: List of data dictionaries
+            
+        Returns:
+            Flattened parameter dictionary for SQL execution
+        """
+        params = {}
+        
+        for i, record in enumerate(data_batch):
+            for col, value in record.items():
+                # Handle datetime serialization
+                if isinstance(value, str) and 'T' in value:
+                    try:
+                        value = datetime.fromisoformat(value.replace('Z', '+00:00'))
+                    except ValueError:
+                        pass  # Keep as string if not valid datetime
+                
+                params[f"{col}_{i}"] = value
+        
+        return params
     
     def _validate_data_batch(
         self, 
         data: List[Dict[str, Any]], 
-        config: ExtractionConfig
+        model_class: Type[Base]
     ) -> List[Dict[str, Any]]:
         """
         Validate and clean data batch before loading
         
         Args:
             data: List of records to validate
-            config: Extraction configuration for validation rules
+            model_class: SQLAlchemy model class for validation
             
         Returns:
             Cleaned and validated data
@@ -131,20 +183,12 @@ class PostgresLoader(LoggerMixin):
             return []
         
         validated_data = []
+        primary_key_cols = self._get_primary_key_columns(model_class)
         
         for i, record in enumerate(data):
             try:
-                # Check required columns are present
-                if config.required_columns:
-                    missing_cols = [col for col in config.required_columns if col not in record]
-                    if missing_cols:
-                        self.logger.warning(
-                            f"Record {i} missing required columns: {missing_cols}"
-                        )
-                        continue
-                
                 # Check primary key values are not null
-                for pk_col in config.primary_key:
+                for pk_col in primary_key_cols:
                     if pk_col not in record or record[pk_col] is None:
                         self.logger.warning(
                             f"Record {i} has null primary key value for: {pk_col}"
@@ -157,12 +201,15 @@ class PostgresLoader(LoggerMixin):
                     # Handle datetime strings
                     if isinstance(value, str) and 'T' in value and ('Z' in value or '+' in value):
                         try:
-                            # Try to parse as ISO datetime
                             cleaned_record[key] = datetime.fromisoformat(value.replace('Z', '+00:00'))
                         except ValueError:
                             cleaned_record[key] = value
                     else:
                         cleaned_record[key] = value
+                
+                # Add processing timestamp if not present
+                if 'fecha_procesamiento' not in cleaned_record:
+                    cleaned_record['fecha_procesamiento'] = datetime.now(timezone.utc)
                 
                 validated_data.append(cleaned_record)
                 
@@ -177,75 +224,23 @@ class PostgresLoader(LoggerMixin):
         
         return validated_data
     
-    async def _ensure_table_exists(
-        self, 
-        table_name: str, 
-        sample_record: Dict[str, Any],
-        primary_key: List[str]
-    ) -> None:
-        """
-        Ensure target table exists, create if necessary
-        
-        Args:
-            table_name: Name of table to check/create
-            sample_record: Sample record for schema inference
-            primary_key: Primary key columns
-        """
-        # Basic table creation - in production, use migrations instead
-        if not sample_record:
-            return
-        
-        # Infer column types from sample data
-        columns_def = []
-        for col_name, value in sample_record.items():
-            if isinstance(value, bool):
-                col_type = "BOOLEAN"
-            elif isinstance(value, int):
-                col_type = "INTEGER" 
-            elif isinstance(value, float):
-                col_type = "DOUBLE PRECISION"
-            elif isinstance(value, datetime):
-                col_type = "TIMESTAMP WITH TIME ZONE"
-            else:
-                col_type = "TEXT"
-            
-            columns_def.append(f"{col_name} {col_type}")
-        
-        # Add primary key constraint if specified
-        if primary_key:
-            pk_constraint = f"PRIMARY KEY ({', '.join(primary_key)})"
-            columns_def.append(pk_constraint)
-        
-        create_table_sql = f"""
-        CREATE TABLE IF NOT EXISTS {table_name} (
-            {', '.join(columns_def)}
-        )
-        """
-        
-        async with self.engine.begin() as conn:
-            await conn.execute(text(create_table_sql))
-            
-        self.logger.info(f"Ensured table exists: {table_name}")
-    
     async def load_data_batch(
         self, 
         table_name: str,
         data: List[Dict[str, Any]],
-        primary_key: List[str],
+        primary_key: Optional[List[str]] = None,  # Ignored - uses model definition
         upsert: bool = True,
-        validate: bool = True,
-        create_table: bool = False
+        validate: bool = True
     ) -> LoadResult:
         """
-        Load a batch of data with UPSERT support
+        Load a batch of data using SQLAlchemy models with UPSERT support
         
         Args:
             table_name: Target table name
             data: List of records to load
-            primary_key: Primary key columns for UPSERT
+            primary_key: Ignored - primary key taken from model definition
             upsert: Use UPSERT (True) or INSERT only (False)
             validate: Validate data before loading
-            create_table: Auto-create table if it doesn't exist
             
         Returns:
             LoadResult with detailed statistics
@@ -264,23 +259,12 @@ class PostgresLoader(LoggerMixin):
             )
         
         try:
-            # Get extraction config for validation
-            config = None
-            try:
-                config = ETLConfig.get_config(table_name)
-            except ValueError:
-                # Table not in config - use defaults
-                config = ExtractionConfig(
-                    table_name=table_name,
-                    table_type="dashboard",
-                    description=f"Auto-generated config for {table_name}",
-                    primary_key=primary_key,
-                    incremental_column="updated_at"
-                )
+            # Get model class
+            model_class = self._get_model_class(table_name)
             
             # Validate data if requested
-            if validate and config:
-                data = self._validate_data_batch(data, config)
+            if validate:
+                data = self._validate_data_batch(data, model_class)
                 
             if not data:
                 return LoadResult(
@@ -294,58 +278,44 @@ class PostgresLoader(LoggerMixin):
                     error_message="No valid records to load"
                 )
             
-            # Create table if requested
-            if create_table:
-                await self._ensure_table_exists(table_name, data[0], primary_key)
+            # Process in batches
+            total_processed = 0
             
-            # Get column names from first record
-            columns = list(data[0].keys())
-            
-            # Determine conflict action
-            conflict_action = "UPDATE" if upsert and primary_key else "ERROR"
-            
-            # Build SQL statement
-            sql_statement = self._build_upsert_sql(
-                table_name=table_name,
-                columns=columns,
-                primary_key=primary_key,
-                on_conflict_action=conflict_action
-            )
-            
-            self.logger.debug(f"Using SQL: {sql_statement}")
-            
-            # Execute in transaction
-            inserted_count = 0
-            updated_count = 0
-            
-            async with self.engine.begin() as conn:
-                for record in data:
-                    try:
-                        result = await conn.execute(text(sql_statement), record)
+            async with self.async_session_factory() as session:
+                # Split data into batches
+                for i in range(0, len(data), self.max_batch_size):
+                    batch = data[i:i + self.max_batch_size]
+                    
+                    if upsert:
+                        # Use raw SQL UPSERT for better performance
+                        upsert_sql = self._build_upsert_statement(model_class, batch)
+                        params = self._prepare_batch_parameters(batch)
                         
-                        # PostgreSQL doesn't easily tell us if it was INSERT vs UPDATE
-                        # For now, count all as successful operations
-                        if result.rowcount > 0:
-                            inserted_count += 1
+                        result = await session.execute(text(upsert_sql), params)
+                        total_processed += len(batch)
                         
-                    except Exception as e:
-                        self.logger.error(f"Error loading record: {str(e)}")
-                        # Don't raise - continue with other records
-                        continue
+                    else:
+                        # Use ORM bulk insert
+                        objects = [model_class(**record) for record in batch]
+                        session.add_all(objects)
+                        total_processed += len(objects)
+                
+                # Commit all changes
+                await session.commit()
             
             duration = time.time() - start_time
             
             self.logger.info(
-                f"Loaded {table_name}: {inserted_count} records "
-                f"in {duration:.2f}s (upsert: {upsert})"
+                f"Loaded {table_name}: {total_processed} records "
+                f"in {duration:.2f}s (UPSERT: {upsert})"
             )
             
             return LoadResult(
                 table_name=table_name,
                 total_records=len(data),
-                inserted_records=inserted_count,
-                updated_records=updated_count,  # TODO: Distinguish INSERT vs UPDATE
-                skipped_records=len(data) - inserted_count,
+                inserted_records=total_processed,  # TODO: Distinguish INSERT vs UPDATE
+                updated_records=0,
+                skipped_records=len(data) - total_processed,
                 load_duration_seconds=duration,
                 status="success"
             )
@@ -370,17 +340,17 @@ class PostgresLoader(LoggerMixin):
         self,
         table_name: str,
         data_stream: AsyncGenerator[List[Dict[str, Any]], None],
-        primary_key: List[str],
+        primary_key: Optional[List[str]] = None,  # Ignored
         upsert: bool = True,
         batch_size: Optional[int] = None
     ) -> LoadResult:
         """
-        Load data from an async stream in batches
+        Load data from an async stream in batches using SQLAlchemy models
         
         Args:
             table_name: Target table name
             data_stream: Async generator yielding batches of records
-            primary_key: Primary key columns for UPSERT
+            primary_key: Ignored - uses model definition
             upsert: Use UPSERT (True) or INSERT only (False)
             batch_size: Override default batch size
             
@@ -402,14 +372,12 @@ class PostgresLoader(LoggerMixin):
                 
                 self.logger.debug(f"Processing batch {batch_count} with {len(batch)} records")
                 
-                # Load batch
+                # Load batch using the model-based approach
                 batch_result = await self.load_data_batch(
                     table_name=table_name,
                     data=batch,
-                    primary_key=primary_key,
                     upsert=upsert,
-                    validate=True,
-                    create_table=(batch_count == 1)  # Create table on first batch
+                    validate=True
                 )
                 
                 # Aggregate results
@@ -465,7 +433,7 @@ class PostgresLoader(LoggerMixin):
         data: List[Dict[str, Any]]
     ) -> LoadResult:
         """
-        Truncate table and load fresh data (for full refresh)
+        Truncate table and load fresh data using SQLAlchemy models
         
         Args:
             table_name: Target table name
@@ -477,17 +445,21 @@ class PostgresLoader(LoggerMixin):
         start_time = time.time()
         
         try:
-            async with self.engine.begin() as conn:
+            # Get model class
+            model_class = self._get_model_class(table_name)
+            
+            async with self.async_session_factory() as session:
                 # Truncate table
-                await conn.execute(text(f"TRUNCATE TABLE {table_name}"))
-                self.logger.info(f"Truncated table: {table_name}")
+                await session.execute(text(f"TRUNCATE TABLE {model_class.__tablename__}"))
+                await session.commit()
+                
+            self.logger.info(f"Truncated table: {table_name}")
             
             # Load fresh data (no UPSERT needed after truncate)
             result = await self.load_data_batch(
                 table_name=table_name,
                 data=data,
-                primary_key=[],  # No primary key needed for INSERT after TRUNCATE
-                upsert=False,
+                upsert=False,  # No need for UPSERT after TRUNCATE
                 validate=True
             )
             
@@ -513,27 +485,87 @@ class PostgresLoader(LoggerMixin):
             )
     
     async def get_table_stats(self, table_name: str) -> Dict[str, Any]:
-        """Get statistics about a table"""
+        """Get statistics about a table using its model"""
         try:
-            stats_sql = f"""
-            SELECT 
-                COUNT(*) as row_count,
-                pg_size_pretty(pg_total_relation_size('{table_name}')) as table_size,
-                (SELECT COUNT(*) FROM information_schema.columns 
-                 WHERE table_name = '{table_name}') as column_count
-            """
+            model_class = self._get_model_class(table_name)
             
-            async with self.engine.begin() as conn:
-                result = await conn.execute(text(stats_sql))
-                row = result.fetchone()
+            async with self.async_session_factory() as session:
+                # Basic row count
+                count_result = await session.execute(
+                    text(f"SELECT COUNT(*) FROM {model_class.__tablename__}")
+                )
+                row_count = count_result.scalar()
                 
-                if row:
-                    return dict(row._mapping)
+                # Table size
+                size_result = await session.execute(
+                    text(f"""
+                    SELECT pg_size_pretty(pg_total_relation_size('{model_class.__tablename__}')) as table_size
+                    """)
+                )
+                table_size = size_result.scalar()
                 
-            return {"error": "Table not found"}
-            
+                # Column count from model
+                column_count = len(model_class.__table__.columns)
+                
+                return {
+                    "table_name": table_name,
+                    "row_count": row_count,
+                    "table_size": table_size,
+                    "column_count": column_count,
+                    "primary_key": self._get_primary_key_columns(model_class),
+                    "model_class": model_class.__name__
+                }
+                
         except Exception as e:
-            return {"error": str(e)}
+            return {
+                "table_name": table_name,
+                "error": str(e)
+            }
+    
+    async def validate_table_schema(self, table_name: str) -> Dict[str, Any]:
+        """Validate that the actual table schema matches the SQLAlchemy model"""
+        try:
+            model_class = self._get_model_class(table_name)
+            
+            async with self.async_session_factory() as session:
+                # Get actual table schema from database
+                schema_result = await session.execute(
+                    text("""
+                    SELECT column_name, data_type, is_nullable
+                    FROM information_schema.columns 
+                    WHERE table_name = :table_name
+                    ORDER BY ordinal_position
+                    """),
+                    {"table_name": model_class.__tablename__}
+                )
+                
+                db_columns = {row[0]: {"type": row[1], "nullable": row[2] == "YES"} 
+                             for row in schema_result.fetchall()}
+                
+                # Get model columns
+                model_columns = {col.name: {"type": str(col.type), "nullable": col.nullable} 
+                               for col in model_class.__table__.columns}
+                
+                # Compare schemas
+                missing_in_db = set(model_columns.keys()) - set(db_columns.keys())
+                missing_in_model = set(db_columns.keys()) - set(model_columns.keys())
+                
+                return {
+                    "table_name": table_name,
+                    "schema_valid": len(missing_in_db) == 0 and len(missing_in_model) == 0,
+                    "db_columns": len(db_columns),
+                    "model_columns": len(model_columns),
+                    "missing_in_db": list(missing_in_db),
+                    "missing_in_model": list(missing_in_model),
+                    "status": "valid" if len(missing_in_db) == 0 and len(missing_in_model) == 0 else "invalid"
+                }
+                
+        except Exception as e:
+            return {
+                "table_name": table_name,
+                "schema_valid": False,
+                "error": str(e)
+            }
 
 
 # 🎯 Convenience functions for easy imports
@@ -544,14 +576,12 @@ async def get_loader() -> PostgresLoader:
 
 async def quick_load(
     table_name: str, 
-    data: List[Dict[str, Any]], 
-    primary_key: List[str]
+    data: List[Dict[str, Any]]
 ) -> LoadResult:
-    """Quick load with UPSERT for small datasets"""
+    """Quick load with UPSERT for small datasets using models"""
     loader = await get_loader()
     return await loader.load_data_batch(
         table_name=table_name,
         data=data,
-        primary_key=primary_key,
         upsert=True
     )
