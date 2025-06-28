@@ -4,7 +4,7 @@ Centralized settings for the entire application
 """
 
 import os
-from typing import List, Optional
+from typing import List, Optional, Union
 
 from pydantic import Field, validator
 from pydantic_settings import BaseSettings
@@ -67,7 +67,9 @@ class Settings(BaseSettings):
     # Security
     SECRET_KEY: str = Field(default="dev-secret-key-change-in-production")
     API_KEY: Optional[str] = Field(default=None)
-    CORS_ORIGINS: List[str] = Field(default=["*"])
+    
+    # CORS Origins - Handle as string first, then parse
+    CORS_ORIGINS: Union[str, List[str]] = Field(default="*")
     
     # Monitoring
     PROMETHEUS_ENABLED: bool = Field(default=True)
@@ -112,10 +114,36 @@ class Settings(BaseSettings):
     
     @validator('CORS_ORIGINS', pre=True)
     def parse_cors_origins(cls, v) -> List[str]:
-        """Parse CORS origins from string or list"""
+        """
+        Parse CORS origins from various input formats
+        
+        Handles:
+        - Empty string -> ["*"]
+        - None -> ["*"] 
+        - "*" -> ["*"]
+        - "url1,url2,url3" -> ["url1", "url2", "url3"]
+        - List[str] -> List[str] (passthrough)
+        """
+        # Handle None or empty cases
+        if not v or v == "":
+            return ["*"]
+        
+        # Handle string input
         if isinstance(v, str):
-            return [origin.strip() for origin in v.split(",")]
-        return v
+            # Single asterisk means allow all
+            if v.strip() == "*":
+                return ["*"]
+            
+            # Split by comma and clean up
+            origins = [origin.strip() for origin in v.split(",") if origin.strip()]
+            return origins if origins else ["*"]
+        
+        # Handle list input (passthrough)
+        if isinstance(v, list):
+            return [str(origin).strip() for origin in v if str(origin).strip()]
+        
+        # Default fallback
+        return ["*"]
     
     @validator('DATA_SOURCE_TYPE', pre=True)
     def validate_data_source_type(cls, v: str) -> str:
@@ -134,6 +162,13 @@ class Settings(BaseSettings):
     def is_production(self) -> bool:
         """Check if running in production mode"""
         return self.ENVIRONMENT.lower() in ["production", "prod"]
+    
+    @property
+    def cors_origins_list(self) -> List[str]:
+        """Get CORS origins as list (guaranteed to be List[str])"""
+        if isinstance(self.CORS_ORIGINS, str):
+            return self.parse_cors_origins(self.CORS_ORIGINS)
+        return self.CORS_ORIGINS
     
     class Config:
         env_file = ".env"
