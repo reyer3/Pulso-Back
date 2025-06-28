@@ -1,185 +1,254 @@
 """
-🎯 Productivity Analysis Data Models
-Pydantic models matching Frontend ProductivityPage types EXACTLY
+🎯 Modelos de Datos para Análisis de Productividad
+Modelos Pydantic que coinciden con los tipos de Frontend ProductivityPage y las necesidades del endpoint.
 """
 
-from typing import Dict, List, Optional, Union
+# Imports estándar
+from datetime import date # Necesario para el tipo de fecha_inicio y fecha_fin en ProductivityRequest
+from typing import Any, Dict, List, Optional
+
+# Imports de terceros
 from pydantic import BaseModel, Field
 
-from app.models.base import BaseResponse
+# Imports internos
+from app.models.base import BaseResponse # Usado por el ProductivityResponse unificado
 from app.models.common import FrontendCompatibleModel, HeatmapMetric
 
 
 # =============================================================================
-# PRODUCTIVITY DATA MODELS - EXACT FRONTEND MATCH  
+# MODELOS DE SOLICITUD DE PRODUCTIVIDAD (Unificados y basados en el endpoint)
+# =============================================================================
+
+class ProductivityRequest(BaseModel):
+    """
+    Modelo de solicitud para el análisis de productividad.
+    Combina campos del modelo inline del endpoint y el modelo del ticket.
+    """
+    fecha_inicio: Optional[date] = Field(None, description="Fecha de inicio para el análisis (YYYY-MM-DD)")
+    fecha_fin: Optional[date] = Field(None, description="Fecha de fin para el análisis (YYYY-MM-DD)")
+    agente: Optional[str] = Field(None, description="Identificador o nombre del agente (opcional, del ticket)")
+    filtros: Optional[Dict[str, Any]] = Field(
+        default_factory=dict,
+        description="Criterios de filtro (del endpoint inline, tipo Any para flexibilidad)"
+    )
+    metric_type: Optional[str] = Field(
+        default="gestiones",
+        description="Tipo de métrica para el heatmap (del endpoint inline)"
+    )
+    # Campos del modelo ProductivityRequest en app/models/productivity.py (original)
+    # que podrían ser útiles o necesitar integración si son distintos:
+    # includeHeatmap: bool = Field(default=True, description="Incluir heatmap de agente")
+    # includeRanking: bool = Field(default=True, description="Incluir ranking de agente")
+    # includeTrends: bool = Field(default=True, description="Incluir análisis de tendencias")
+    # maxAgents: int = Field(default=50, description="Máximo de agentes a incluir")
+
+    class Config:
+        anystr_strip_whitespace = True
+
+
+# =============================================================================
+# MODELOS DE DATOS DE PRODUCTIVIDAD (Reutilizados/unificados desde el endpoint y models.py)
 # =============================================================================
 
 class AgentDailyPerformance(FrontendCompatibleModel):
     """
-    Agent daily performance data - EXACT match with Frontend AgentDailyPerformance interface
+    Datos de rendimiento diario del agente.
+    (Coincide con el modelo inline y el de app/models/productivity.py)
     """
-    gestiones: Optional[int] = Field(description="Number of management actions")
-    contactosEfectivos: Optional[int] = Field(description="Effective contacts")
-    compromisos: Optional[int] = Field(description="Commitments/promises")
+    gestiones: Optional[int] = Field(None, description="Número de gestiones realizadas")
+    contactosEfectivos: Optional[int] = Field(None, description="Número de contactos efectivos")
+    compromisos: Optional[int] = Field(None, description="Número de compromisos/promesas de pago")
 
 
 class AgentHeatmapRow(FrontendCompatibleModel):
     """
-    Agent heatmap row data - EXACT match with Frontend AgentHeatmapRow interface  
+    Fila de datos para el heatmap de agentes.
+    (Coincide con el modelo inline y el de app/models/productivity.py)
     """
-    id: str = Field(description="Unique agent identifier")
-    dni: str = Field(description="Agent DNI")
-    agentName: str = Field(description="Agent full name")
+    id: str = Field(description="Identificador único del agente")
+    dni: str = Field(description="DNI del agente")
+    agentName: str = Field(description="Nombre completo del agente")
     dailyPerformance: Dict[int, Optional[AgentDailyPerformance]] = Field(
-        description="Daily performance by day number"
+        description="Rendimiento diario por número de día"
     )
 
 
 class ProductivityTrendPoint(FrontendCompatibleModel):
     """
-    Productivity trend data point - EXACT match with Frontend ProductivityTrendPoint interface
+    Punto de datos para la tendencia de productividad.
+    (Coincide con el modelo inline y el de app/models/productivity.py)
     """
-    day: Optional[int] = Field(description="Day number (for daily trend)")
-    hour: Optional[str] = Field(description="Hour string (for hourly trend)")
-    llamadas: int = Field(description="Number of calls")
-    compromisos: int = Field(description="Number of commitments")
-    recupero: Optional[float] = Field(description="Recovery amount (daily trend only)")
+    day: Optional[int] = Field(None, description="Número del día (para tendencia diaria)")
+    hour: Optional[str] = Field(None, description="Cadena de hora (para tendencia horaria, ej: '09:00')")
+    llamadas: int = Field(description="Número de llamadas")
+    compromisos: int = Field(description="Número de compromisos")
+    recupero: Optional[float] = Field(None, description="Monto recuperado (solo para tendencia diaria)")
 
 
 class AgentRankingRow(FrontendCompatibleModel):
     """
-    Agent ranking row data - EXACT match with Frontend AgentRankingRow interface
+    Fila de datos para el ranking de agentes.
+    (Coincide con el modelo inline y el de app/models/productivity.py)
     """
-    id: str = Field(description="Unique agent identifier")
-    rank: int = Field(description="Agent rank position")
-    agentName: str = Field(description="Agent full name")
-    calls: int = Field(description="Total calls made")
-    directContacts: int = Field(description="Direct contacts achieved")
-    commitments: int = Field(description="Commitments obtained")
-    amountRecovered: float = Field(description="Amount recovered")
-    closingRate: float = Field(description="Closure rate percentage")
-    commitmentConversion: float = Field(description="Commitment conversion percentage")
-    quartile: int = Field(description="Performance quartile (1-4)", ge=1, le=4)
+    id: str = Field(description="Identificador único del agente")
+    rank: int = Field(description="Posición en el ranking del agente")
+    agentName: str = Field(description="Nombre completo del agente")
+    calls: int = Field(description="Total de llamadas realizadas")
+    directContacts: int = Field(description="Contactos directos logrados")
+    commitments: int = Field(description="Compromisos obtenidos")
+    amountRecovered: float = Field(description="Monto recuperado")
+    closingRate: float = Field(description="Porcentaje de tasa de cierre")
+    commitmentConversion: float = Field(description="Porcentaje de conversión de compromisos")
+    quartile: int = Field(description="Cuartil de rendimiento (1-4)", ge=1, le=4)
+
+
+class ProductivityDetail(BaseModel): # Modelo del ticket
+    """
+    Detalle de productividad por agente, según el ticket.
+    Este modelo es más simple que AgentRankingRow. Se mantendrá por si es usado en otro contexto
+    o si la lógica de negocio lo requiere específicamente.
+    """
+    agente: str = Field(description="Nombre o identificador del agente")
+    gestiones: int = Field(description="Número de gestiones")
+    pagos: int = Field(description="Número de pagos conseguidos") # Asumo que "pagos" es diferente a "compromisos"
+    efectividad: float = Field(description="Tasa de efectividad (ej. pagos/gestiones)")
+    ranking: int = Field(description="Posición en el ranking")
 
 
 # =============================================================================
-# PRODUCTIVITY RESPONSE MODELS - EXACT FRONTEND MATCH
+# MODELOS DE RESPUESTA DE PRODUCTIVIDAD (Unificados)
 # =============================================================================
 
 class ProductivityData(FrontendCompatibleModel):
     """
-    Complete productivity data - EXACT match with Frontend ProductivityData interface
+    Datos completos de productividad.
+    (Este es el `data` dentro del `ProductivityResponse` de `app/models/productivity.py`)
     """
-    dailyTrend: List[ProductivityTrendPoint] = Field(description="Daily trend data")
-    hourlyTrend: List[ProductivityTrendPoint] = Field(description="Hourly trend data")
-    agentRanking: List[AgentRankingRow] = Field(description="Agent ranking data")
-    agentHeatmap: List[AgentHeatmapRow] = Field(description="Agent heatmap data")
+    dailyTrend: List[ProductivityTrendPoint] = Field(description="Datos de tendencia diaria")
+    hourlyTrend: List[ProductivityTrendPoint] = Field(description="Datos de tendencia horaria")
+    agentRanking: List[AgentRankingRow] = Field(description="Datos del ranking de agentes")
+    agentHeatmap: List[AgentHeatmapRow] = Field(description="Datos del heatmap de agentes")
+    # El modelo inline `ProductivityResponse` no tiene `metadata`, pero el de `app/models` sí.
+    # Se omite aquí para que coincida con el `response_model` del endpoint, que es más simple.
 
 
-class ProductivityResponse(BaseResponse):
+class ProductivityResponse(BaseModel): # Modelo de respuesta principal para el endpoint
     """
-    Productivity analysis API response
+    Modelo de respuesta para el análisis de productividad, basado en el endpoint inline.
+    Este es el que se usará como `response_model` en el endpoint.
     """
-    data: ProductivityData = Field(description="Productivity analysis data")
-    dateRange: Dict[str, str] = Field(description="Analysis date range")
-    queryTime: float = Field(description="Query execution time")
+    dailyTrend: List[ProductivityTrendPoint] = Field(description="Tendencia de productividad diaria")
+    hourlyTrend: List[ProductivityTrendPoint] = Field(description="Tendencia de productividad horaria")
+    agentRanking: List[AgentRankingRow] = Field(description="Ranking de agentes")
+    agentHeatmap: List[AgentHeatmapRow] = Field(description="Heatmap de rendimiento de agentes")
+    metadata: Dict[str, Any] = Field(description="Metadatos de la respuesta")
 
 
-# =============================================================================
-# PRODUCTIVITY REQUEST MODELS
-# =============================================================================
+class ProductivityTicketResponse(BaseModel): # Modelo de respuesta del ticket
+    """
+    Modelo de respuesta para el análisis de productividad, según el ticket.
+    Se mantiene por si es necesario para una lógica de negocio específica o un endpoint diferente.
+    """
+    total_agentes: int = Field(description="Número total de agentes")
+    promedio_efectividad: float = Field(description="Promedio de efectividad general")
+    detalles: List[ProductivityDetail] = Field(description="Lista de detalles de productividad por agente")
 
-class ProductivityRequest(BaseModel):
-    """
-    Request model for productivity analysis
-    """
-    dateFrom: str = Field(description="Start date (YYYY-MM-DD)")
-    dateTo: str = Field(description="End date (YYYY-MM-DD)")
-    includeHeatmap: bool = Field(default=True, description="Include agent heatmap")
-    includeRanking: bool = Field(default=True, description="Include agent ranking")
-    includeTrends: bool = Field(default=True, description="Include trend analysis")
-    maxAgents: int = Field(default=50, description="Maximum agents to include")
+
+# ---------------------------------------------------------------------------
+# Otros modelos de app/models/productivity.py que no están directamente en los endpoints
+# pero podrían ser relevantes para la lógica de servicio o para otros endpoints.
+# Se mantienen aquí para consolidación, comentados si no se usan activamente en este refactor.
+# ---------------------------------------------------------------------------
+
+# class ProductivityResponseWithBase(BaseResponse): # El que estaba en app/models
+#     """
+#     Respuesta de API para análisis de productividad, usando BaseResponse.
+#     """
+#     data: ProductivityData = Field(description="Datos del análisis de productividad")
+#     dateRange: Optional[Dict[str, str]] = Field(None, description="Rango de fechas del análisis")
+#     queryTime: Optional[float] = Field(None, description="Tiempo de ejecución de la consulta en segundos")
 
 
 class ProductivityFilters(BaseModel):
     """
-    Productivity analysis filters
+    Filtros para el análisis de productividad.
+    (Modelo de app/models/productivity.py)
     """
-    agents: List[str] = Field(default=[], description="Specific agent IDs to include")
-    teams: List[str] = Field(default=[], description="Team names to include")
+    agents: List[str] = Field(default_factory=list, description="IDs de agentes específicos a incluir")
+    teams: List[str] = Field(default_factory=list, description="Nombres de equipos a incluir")
     metrics: List[HeatmapMetric] = Field(
-        default=[HeatmapMetric.GESTIONES, HeatmapMetric.CONTACTOS_EFECTIVOS, HeatmapMetric.COMPROMISOS],
-        description="Metrics to include in analysis"
+        default_factory=lambda: [HeatmapMetric.GESTIONES, HeatmapMetric.CONTACTOS_EFECTIVOS, HeatmapMetric.COMPROMISOS],
+        description="Métricas a incluir en el análisis"
     )
-    quartiles: List[int] = Field(default=[1, 2, 3, 4], description="Quartiles to include")
-    minCalls: int = Field(default=10, description="Minimum calls for inclusion")
+    quartiles: List[int] = Field(default_factory=lambda: [1, 2, 3, 4], description="Cuartiles a incluir")
+    minCalls: int = Field(default=10, description="Mínimo de llamadas para inclusión")
 
-
-# =============================================================================
-# PRODUCTIVITY SUMMARY MODELS
-# =============================================================================
 
 class ProductivitySummary(FrontendCompatibleModel):
     """
-    Productivity summary statistics
+    Estadísticas de resumen de productividad.
+    (Modelo de app/models/productivity.py)
     """
-    totalAgents: int = Field(description="Total agents analyzed")
-    activeAgents: int = Field(description="Active agents in period")
-    totalCalls: int = Field(description="Total calls made")
-    totalCommitments: int = Field(description="Total commitments")
-    totalRecovery: float = Field(description="Total amount recovered")
-    averageCallsPerAgent: float = Field(description="Average calls per agent")
-    averageCommitmentsPerAgent: float = Field(description="Average commitments per agent")
-    topPerformerAgent: str = Field(description="Top performing agent name")
-    conversionRate: float = Field(description="Overall commitment conversion rate")
+    totalAgents: int = Field(description="Total de agentes analizados")
+    activeAgents: int = Field(description="Agentes activos en el período")
+    totalCalls: int = Field(description="Total de llamadas realizadas")
+    totalCommitments: int = Field(description="Total de compromisos")
+    totalRecovery: float = Field(description="Monto total recuperado")
+    averageCallsPerAgent: float = Field(description="Promedio de llamadas por agente")
+    averageCommitmentsPerAgent: float = Field(description="Promedio de compromisos por agente")
+    topPerformerAgent: Optional[str] = Field(None, description="Nombre del agente con mejor rendimiento")
+    conversionRate: float = Field(description="Tasa de conversión general de compromisos")
 
 
 class AgentPerformanceDetail(FrontendCompatibleModel):
     """
-    Detailed agent performance information
+    Información detallada del rendimiento del agente.
+    (Modelo de app/models/productivity.py)
     """
-    agentId: str = Field(description="Agent unique identifier")
-    agentName: str = Field(description="Agent full name")
-    dni: str = Field(description="Agent DNI")
-    team: Optional[str] = Field(description="Team name")
-    totalCalls: int = Field(description="Total calls")
-    effectiveContacts: int = Field(description="Effective contacts")
-    commitments: int = Field(description="Commitments obtained")
-    recoveryAmount: float = Field(description="Amount recovered")
-    contactRate: float = Field(description="Contact rate percentage")
-    conversionRate: float = Field(description="Commitment conversion rate")
-    closingRate: float = Field(description="Closure rate")
-    rank: int = Field(description="Current rank")
-    quartile: int = Field(description="Performance quartile")
-    trendDirection: str = Field(description="Performance trend (up/down/stable)")
-    bestDay: Optional[int] = Field(description="Best performing day")
-    bestHour: Optional[str] = Field(description="Best performing hour")
+    agentId: str = Field(description="Identificador único del agente")
+    agentName: str = Field(description="Nombre completo del agente")
+    dni: str = Field(description="DNI del agente")
+    team: Optional[str] = Field(None, description="Nombre del equipo")
+    totalCalls: int = Field(description="Total de llamadas")
+    effectiveContacts: int = Field(description="Contactos efectivos")
+    commitments: int = Field(description="Compromisos obtenidos")
+    recoveryAmount: float = Field(description="Monto recuperado")
+    contactRate: float = Field(description="Porcentaje de tasa de contacto")
+    conversionRate: float = Field(description="Tasa de conversión de compromisos")
+    closingRate: float = Field(description="Tasa de cierre")
+    rank: int = Field(description="Ranking actual")
+    quartile: int = Field(description="Cuartil de rendimiento")
+    trendDirection: Optional[str] = Field(None, description="Tendencia de rendimiento (sube/baja/estable)")
+    bestDay: Optional[int] = Field(None, description="Día de mejor rendimiento (número del mes)")
+    bestHour: Optional[str] = Field(None, description="Hora de mejor rendimiento (HH:MM)")
 
 
 class TeamPerformance(FrontendCompatibleModel):
     """
-    Team performance aggregation
+    Agregación del rendimiento del equipo.
+    (Modelo de app/models/productivity.py)
     """
-    teamName: str = Field(description="Team name")
-    totalAgents: int = Field(description="Number of agents in team")
-    activeAgents: int = Field(description="Active agents in period")
-    totalCalls: int = Field(description="Team total calls")
-    totalCommitments: int = Field(description="Team total commitments")
-    teamRecovery: float = Field(description="Team recovery amount")
-    teamContactRate: float = Field(description="Team contact rate")
-    teamConversionRate: float = Field(description="Team conversion rate")
-    teamRank: int = Field(description="Team rank")
-    topAgent: str = Field(description="Top agent in team")
+    teamName: str = Field(description="Nombre del equipo")
+    totalAgents: int = Field(description="Número de agentes en el equipo")
+    activeAgents: int = Field(description="Agentes activos en el período")
+    totalCalls: int = Field(description="Total de llamadas del equipo")
+    totalCommitments: int = Field(description="Total de compromisos del equipo")
+    teamRecovery: float = Field(description="Monto recuperado por el equipo")
+    teamContactRate: float = Field(description="Tasa de contacto del equipo")
+    teamConversionRate: float = Field(description="Tasa de conversión del equipo")
+    teamRank: Optional[int] = Field(None, description="Ranking del equipo")
+    topAgent: Optional[str] = Field(None, description="Agente principal en el equipo")
 
 
 class HourlyProductivityBreakdown(FrontendCompatibleModel):
     """
-    Hourly productivity breakdown
+    Desglose de productividad por hora.
+    (Modelo de app/models/productivity.py)
     """
-    hour: str = Field(description="Hour (HH:MM)")
-    totalCalls: int = Field(description="Total calls in hour")
-    totalCommitments: int = Field(description="Total commitments in hour")
-    averagePerAgent: float = Field(description="Average calls per agent")
-    conversionRate: float = Field(description="Hour conversion rate")
-    activeAgents: int = Field(description="Active agents in hour")
-    efficiency: float = Field(description="Hour efficiency score")
+    hour: str = Field(description="Hora (HH:MM)")
+    totalCalls: int = Field(description="Total de llamadas en la hora")
+    totalCommitments: int = Field(description="Total de compromisos en la hora")
+    averagePerAgent: Optional[float] = Field(None, description="Promedio de llamadas por agente en la hora")
+    conversionRate: Optional[float] = Field(None, description="Tasa de conversión de la hora")
+    activeAgents: Optional[int] = Field(None, description="Agentes activos en la hora")
+    efficiency: Optional[float] = Field(None, description="Puntuación de eficiencia de la hora")
