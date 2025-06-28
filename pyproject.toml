@@ -27,10 +27,10 @@ dependencies = [
     "uvicorn[standard]>=0.24.0",
     "python-multipart>=0.0.19", # Necesario para subida de archivos en FastAPI
     # Database & Cache
-    "psycopg2-binary>=2.9.9",
+    # "psycopg2-binary>=2.9.9", # Replaced by asyncpg
     "redis>=5.0.1",
-    "sqlalchemy>=2.0.23",
-    "alembic>=1.13.1",
+    "sqlalchemy>=2.0.23", # Keep for now, may be removed if not used by anything else
+    "alembic>=1.13.1", # Keep for now, may be removed if not used by anything else
     # Google Cloud
     "google-cloud-bigquery>=3.13.0",
     "google-cloud-storage>=2.10.0",

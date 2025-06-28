@@ -6,11 +6,12 @@ Este archivo es la única fuente de la verdad para crear y proveer dependencias 
 """
 from typing import Generator, Annotated
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 import redis.asyncio as redis
+# from sqlalchemy.ext.asyncio import AsyncSession # No longer needed for get_db_session
 
 # --- Importamos las piezas básicas de nuestros módulos core ---
-from app.core.database import get_db as get_db_session  # Renombramos para claridad
+# from app.core.database import get_db as get_db_session # This is removed
+from app.services.postgres_service import PostgresService # Import new service
 from app.core.cache import cache as redis_cache_manager
 from app.repositories.data_adapters import DataSourceFactory, DataSourceAdapter
 from app.services.dashboard_service_v2 import DashboardServiceV2
@@ -38,7 +39,17 @@ def get_data_adapter() -> DataSourceAdapter:
 
 # Usamos Annotated para una sintaxis más limpia y un mejor chequeo de tipos.
 # Es la forma moderna y recomendada de usar Depends.
-DBSession = Annotated[AsyncSession, Depends(get_db_session)]
+# DBSession = Annotated[AsyncSession, Depends(get_db_session)] # This is removed
+
+# Dependency for the new PostgresService
+async def get_postgres_service() -> PostgresService:
+    """
+    Provee una instancia de PostgresService.
+    La configuración DSN es manejada dentro del servicio.
+    """
+    return PostgresService()
+
+PostgresDB = Annotated[PostgresService, Depends(get_postgres_service)]
 RedisClient = Annotated[redis.Redis, Depends(get_redis_client)]
 DataAdapter = Annotated[DataSourceAdapter, Depends(get_data_adapter)]
 
