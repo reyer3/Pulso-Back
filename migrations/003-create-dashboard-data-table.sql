@@ -1,6 +1,5 @@
 -- Main dashboard metrics table, optimized for time-series analysis with TimescaleDB
 -- depends: 001-create-watermarks-table
--- depends: 000-enable-timescaledb
 
 CREATE TABLE dashboard_data (
     fecha_foto DATE NOT NULL,

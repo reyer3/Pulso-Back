@@ -1,9 +1,10 @@
 -- Create ETL execution log table
 -- file: 002-create-etl-execution-log-table.sql
--- __depends__ = ["000-enable-timescaledb"]
+-- depends:
 
 CREATE TABLE IF NOT EXISTS etl_execution_log (
-    id SERIAL PRIMARY KEY,
+    id SERIAL,
+    PRIMARY KEY (id, started_at),
     execution_id UUID NOT NULL,
     pipeline_name VARCHAR(255) NOT NULL,
     status VARCHAR(50) NOT NULL,

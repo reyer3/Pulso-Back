@@ -1,6 +1,5 @@
 -- Time series data for evolution analysis, optimized with TimescaleDB
 -- depends: 001-create-watermarks-table
--- depends: 000-enable-timescaledb
 
 CREATE TABLE evolution_data (
     fecha_foto DATE NOT NULL,

@@ -1,6 +1,5 @@
 -- Assignment composition data by period and portfolio
 -- depends: 001-create-watermarks-table
--- depends: 000-enable-timescaledb
 
 CREATE TABLE assignment_data (
     periodo VARCHAR(7) NOT NULL,

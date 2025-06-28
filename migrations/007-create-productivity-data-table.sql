@@ -1,6 +1,5 @@
 -- Daily productivity metrics by agent, optimized with TimescaleDB
 -- depends: 001-create-watermarks-table
--- depends: 000-enable-timescaledb
 
 CREATE TABLE productivity_data (
     fecha_foto DATE NOT NULL,
