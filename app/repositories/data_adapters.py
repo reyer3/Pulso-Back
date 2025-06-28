@@ -4,6 +4,7 @@
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional
 import pandas as pd
+from datetime import date, datetime
 
 from app.core.config import get_settings
 from app.core.logging import LoggerMixin
@@ -28,11 +29,151 @@ class DataSourceAdapter(ABC):
     def dataset(self) -> str:
         pass
 
+# --- QUERY BUILDER PARA COMPATIBILIDAD CROSS-DATABASE ---
+
+class QueryBuilder(LoggerMixin):
+    """
+    Database-agnostic query builder
+    Builds SQL queries that work across BigQuery and PostgreSQL
+    """
+    
+    def __init__(self, data_adapter: DataSourceAdapter):
+        self.data_adapter = data_adapter
+        self.dataset = data_adapter.dataset
+        
+    def select_asignaciones(
+        self, 
+        fecha_inicio: date, 
+        fecha_fin: date, 
+        filters: Dict[str, Any]
+    ) -> str:
+        """Build query for asignaciones data"""
+        
+        # Base query structure
+        query = f"""
+        SELECT 
+            archivo,
+            fecha_asignacion as fecha_asignacion_real,
+            cartera,
+            negocio as servicio,
+            cod_luna,
+            cuenta,
+            deuda_inicial,
+            deuda_inicial as monto_exigible_diario,
+            CASE 
+                WHEN deuda_inicial >= 1 THEN 'GESTIONABLE'
+                ELSE 'NO_GESTIONABLE' 
+            END as estado_deudor
+        FROM `{self.dataset}.batch_P3fV4dWNeMkN5RJMhV8e_asignaciones_clean`
+        WHERE fecha_asignacion >= '{fecha_inicio.isoformat()}'
+          AND fecha_asignacion <= '{fecha_fin.isoformat()}'
+        """
+        
+        # Add filters
+        if filters.get('archivo'):
+            query += f" AND archivo IN {self._format_list(filters['archivo'])}"
+        if filters.get('cartera'):
+            query += f" AND cartera IN {self._format_list(filters['cartera'])}"
+        if filters.get('servicio'):
+            query += f" AND negocio IN {self._format_list(filters['servicio'])}"
+            
+        return query
+    
+    def select_tran_deuda(self, fecha_inicio: date, fecha_fin: date) -> str:
+        """Build query for trandeuda data"""
+        
+        return f"""
+        SELECT 
+            nro_documento as cuenta,
+            fecha_proceso,
+            deuda_total as monto_exigible_diario
+        FROM `{self.dataset}.batch_P3fV4dWNeMkN5RJMhV8e_tran_deuda`
+        WHERE fecha_proceso >= '{fecha_inicio.isoformat()}'
+          AND fecha_proceso <= '{fecha_fin.isoformat()}'
+          AND deuda_total > 0
+        """
+    
+    def select_gestiones_bot(self, fecha_inicio: date, fecha_fin: date) -> str:
+        """Build query for bot gestiones"""
+        
+        return f"""
+        SELECT 
+            codLuna as cod_luna,
+            DATE(fecha_creacion) as fecha_gestion,
+            campaign_name,
+            'BOT' as canal_origen,
+            flujo_final,
+            CASE 
+                WHEN flujo_final IN ('CD', 'CI') THEN TRUE 
+                ELSE FALSE 
+            END as es_contacto_efectivo,
+            CASE 
+                WHEN flujo_final IN ('CD') THEN TRUE 
+                ELSE FALSE 
+            END as es_contacto_directo,
+            CASE 
+                WHEN flujo_final IN ('PDP') THEN TRUE 
+                ELSE FALSE 
+            END as es_compromiso
+        FROM `{self.dataset}.voicebot_P3fV4dWNeMkN5RJMhV8e`
+        WHERE DATE(fecha_creacion) >= '{fecha_inicio.isoformat()}'
+          AND DATE(fecha_creacion) <= '{fecha_fin.isoformat()}'
+        """
+    
+    def select_gestiones_humano(self, fecha_inicio: date, fecha_fin: date) -> str:
+        """Build query for human gestiones"""
+        
+        return f"""
+        SELECT 
+            cod_luna,
+            DATE(fecha_inicio_gestion) as fecha_gestion,
+            campana as campaign_name,
+            'HUMANO' as canal_origen,
+            tipo_resultado as flujo_final,
+            correo_agente,
+            nombre_agente,
+            CASE 
+                WHEN tipo_resultado IN ('CONTACTO_EFECTIVO', 'CD', 'CI') THEN TRUE 
+                ELSE FALSE 
+            END as es_contacto_efectivo,
+            CASE 
+                WHEN tipo_resultado IN ('CONTACTO_EFECTIVO', 'CD') THEN TRUE 
+                ELSE FALSE 
+            END as es_contacto_directo,
+            CASE 
+                WHEN tipo_resultado IN ('PDP', 'COMPROMISO') THEN TRUE 
+                ELSE FALSE 
+            END as es_compromiso
+        FROM `{self.dataset}.mibotair_P3fV4dWNeMkN5RJMhV8e`
+        WHERE DATE(fecha_inicio_gestion) >= '{fecha_inicio.isoformat()}'
+          AND DATE(fecha_inicio_gestion) <= '{fecha_fin.isoformat()}'
+        """
+    
+    def select_pagos(self, fecha_inicio: date, fecha_fin: date) -> str:
+        """Build query for pagos data"""
+        
+        return f"""
+        SELECT DISTINCT
+            nro_documento as cuenta,
+            fecha_pago,
+            monto_cancelado as monto_recuperado
+        FROM `{self.dataset}.batch_P3fV4dWNeMkN5RJMhV8e_pagos`
+        WHERE fecha_pago >= '{fecha_inicio.isoformat()}'
+          AND fecha_pago <= '{fecha_fin.isoformat()}'
+          AND monto_cancelado > 0
+        """
+    
+    def _format_list(self, values: List[str]) -> str:
+        """Format list of values for SQL IN clause"""
+        if isinstance(values, str):
+            values = [values]
+        formatted_values = [f"'{v}'" for v in values]
+        return f"({', '.join(formatted_values)})"
+
 # --- IMPLEMENTACIÓN BIGQUERY ---
 
 from google.cloud import bigquery
 import asyncio
-from datetime import date, datetime
 
 class BigQueryAdapter(DataSourceAdapter, LoggerMixin):
     def __init__(self, project_id: str, dataset_name: str):
