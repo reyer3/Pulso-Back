@@ -1,138 +1,170 @@
 """
-📞 Operation Analysis Data Models
-Pydantic models matching Frontend OperationPage types EXACTLY
+📞 Modelos de Datos para Análisis de Operación
+Modelos Pydantic que coinciden EXACTAMENTE con los tipos de Frontend OperationPage.
 """
+# Imports estándar
+from typing import List, Dict, Optional # Añadido Dict y Optional por si se usan en el futuro o en modelos no mostrados.
 
-from typing import List
+# Imports de terceros
 from pydantic import BaseModel, Field
 
-from app.models.base import BaseResponse
-from app.models.common import FrontendCompatibleModel, ChannelType
+# Imports internos
+from app.models.base import BaseResponse # Asumiendo que BaseResponse es relevante
+from app.models.common import ChannelType, FrontendCompatibleModel
 
 
 # =============================================================================
-# OPERATION DATA MODELS - EXACT FRONTEND MATCH
+# MODELOS DE DATOS DE OPERACIÓN - COINCIDENCIA EXACTA CON FRONTEND
 # =============================================================================
 
 class OperationDayKPI(FrontendCompatibleModel):
     """
-    Daily operation KPI - EXACT match with Frontend OperationDayKPI interface
+    KPI de operación diaria - Coincidencia EXACTA con la interfaz Frontend OperationDayKPI.
     """
-    label: str = Field(description="KPI label")
-    value: str = Field(description="KPI value as string")
+    label: str = Field(description="Etiqueta del KPI")
+    value: str = Field(description="Valor del KPI como cadena de texto")
 
 
 class ChannelMetric(FrontendCompatibleModel):
     """
-    Channel performance metrics - EXACT match with Frontend ChannelMetric interface
+    Métricas de rendimiento del canal - Coincidencia EXACTA con la interfaz Frontend ChannelMetric.
     """
-    channel: ChannelType = Field(description="Channel type (Voicebot | Call Center)")
-    calls: int = Field(description="Total calls")
-    effectiveContacts: int = Field(description="Effective contacts")
-    nonEffectiveContacts: int = Field(description="Non-effective contacts")
-    pdp: int = Field(description="Promises of payment")
-    cierreRate: float = Field(description="Closure rate percentage")
+    channel: ChannelType = Field(description="Tipo de canal (Voicebot | Call Center)")
+    calls: int = Field(description="Llamadas totales")
+    effectiveContacts: int = Field(description="Contactos efectivos")
+    nonEffectiveContacts: int = Field(description="Contactos no efectivos")
+    pdp: int = Field(description="Promesas de pago")
+    cierreRate: float = Field(description="Tasa de cierre porcentual")
 
 
 class HourlyPerformance(FrontendCompatibleModel):
     """
-    Hourly performance data - EXACT match with Frontend HourlyPerformance interface
+    Datos de rendimiento por hora - Coincidencia EXACTA con la interfaz Frontend HourlyPerformance.
     """
-    hour: str = Field(description="Hour in format HH:MM (e.g., '09:00')")
-    effectiveContacts: int = Field(description="Effective contacts in this hour")
-    nonEffectiveContacts: int = Field(description="Non-effective contacts in this hour")
-    pdp: int = Field(description="Promises of payment in this hour")
+    hour: str = Field(description="Hora en formato HH:MM (ej., '09:00')")
+    effectiveContacts: int = Field(description="Contactos efectivos en esta hora")
+    nonEffectiveContacts: int = Field(description="Contactos no efectivos en esta hora")
+    pdp: int = Field(description="Promesas de pago en esta hora")
 
 
 class AttemptEffectiveness(FrontendCompatibleModel):
     """
-    Attempt effectiveness data - EXACT match with Frontend AttemptEffectiveness interface
+    Datos de efectividad por intento - Coincidencia EXACTA con la interfaz Frontend AttemptEffectiveness.
     """
-    attempt: int = Field(description="Attempt number")
-    cierreRate: float = Field(description="Closure rate percentage for this attempt")
+    attempt: int = Field(description="Número de intento")
+    cierreRate: float = Field(description="Tasa de cierre porcentual para este intento")
 
 
 class QueuePerformance(FrontendCompatibleModel):
     """
-    Queue performance data - EXACT match with Frontend QueuePerformance interface
+    Datos de rendimiento de cola - Coincidencia EXACTA con la interfaz Frontend QueuePerformance.
     """
-    queueName: str = Field(description="Queue name")
-    calls: int = Field(description="Total calls")
-    effectiveContacts: int = Field(description="Effective contacts")
-    pdp: int = Field(description="Promises of payment")
-    cierreRate: float = Field(description="Closure rate percentage")
+    queueName: str = Field(description="Nombre de la cola")
+    calls: int = Field(description="Llamadas totales")
+    effectiveContacts: int = Field(description="Contactos efectivos")
+    pdp: int = Field(description="Promesas de pago")
+    cierreRate: float = Field(description="Tasa de cierre porcentual")
 
 
 # =============================================================================
-# OPERATION RESPONSE MODELS - EXACT FRONTEND MATCH
+# MODELOS DE RESPUESTA DE OPERACIÓN - COINCIDENCIA EXACTA CON FRONTEND
 # =============================================================================
 
 class OperationDayAnalysisData(FrontendCompatibleModel):
     """
-    Complete operation day analysis - EXACT match with Frontend OperationDayAnalysisData interface
+    Análisis completo del día de operación - Coincidencia EXACTA con la interfaz Frontend OperationDayAnalysisData.
     """
-    kpis: List[OperationDayKPI] = Field(description="Daily KPIs")
-    channelPerformance: List[ChannelMetric] = Field(description="Channel performance metrics")
-    hourlyPerformance: List[HourlyPerformance] = Field(description="Hourly breakdown")
-    attemptEffectiveness: List[AttemptEffectiveness] = Field(description="Attempt effectiveness")
-    queuePerformance: List[QueuePerformance] = Field(description="Queue performance")
+    kpis: List[OperationDayKPI] = Field(description="KPIs diarios")
+    channelPerformance: List[ChannelMetric] = Field(description="Métricas de rendimiento del canal")
+    hourlyPerformance: List[HourlyPerformance] = Field(description="Desglose por hora")
+    attemptEffectiveness: List[AttemptEffectiveness] = Field(description="Efectividad por intento")
+    queuePerformance: List[QueuePerformance] = Field(description="Rendimiento de la cola")
 
 
-class OperationDayAnalysisResponse(BaseResponse):
+class OperationDayAnalysisResponse(BaseResponse): # Este modelo existe pero no se usa en los endpoints actuales.
     """
-    Operation analysis API response
+    Respuesta de API para análisis de operación. (Actualmente no usado en endpoints de operation.py)
     """
-    data: OperationDayAnalysisData = Field(description="Operation analysis data")
-    date: str = Field(description="Analysis date")
-    queryTime: float = Field(description="Query execution time")
+    data: OperationDayAnalysisData = Field(description="Datos del análisis de operación")
+    date: str = Field(description="Fecha del análisis") # Formato YYYY-MM-DD
+    queryTime: float = Field(description="Tiempo de ejecución de la consulta en segundos")
 
 
 # =============================================================================
-# OPERATION REQUEST MODELS
+# MODELOS DE SOLICITUD DE OPERACIÓN
 # =============================================================================
 
 class OperationDayRequest(BaseModel):
     """
-    Request model for operation day analysis
+    Modelo de solicitud para el análisis del día de operación.
     """
-    date: str = Field(description="Analysis date (YYYY-MM-DD)")
-    includeHourlyBreakdown: bool = Field(default=True, description="Include hourly performance")
-    includeQueueDetails: bool = Field(default=True, description="Include queue performance")
-    includeAttemptAnalysis: bool = Field(default=True, description="Include attempt effectiveness")
+    date: str = Field(description="Fecha del análisis (YYYY-MM-DD)")
+    includeHourlyBreakdown: bool = Field(
+        default=True, description="Incluir rendimiento por hora"
+    )
+    includeQueueDetails: bool = Field(
+        default=True, description="Incluir rendimiento de la cola"
+    )
+    includeAttemptAnalysis: bool = Field(
+        default=True, description="Incluir efectividad por intento"
+    )
+    # Ejemplo de campo adicional que podría existir, si es necesario.
+    # filtros: Optional[Dict[str, str]] = Field(None, description="Filtros adicionales para la consulta")
 
 
-class OperationFilters(BaseModel):
+class OperationFilters(BaseModel): # Este modelo no se usa directamente en los endpoints actuales, pero es bueno tenerlo definido.
     """
-    Operation analysis filters
+    Filtros para el análisis de operación. (Actualmente no usado en endpoints de operation.py)
     """
-    channels: List[str] = Field(default=["Voicebot", "Call Center"], description="Channels to include")
-    queues: List[str] = Field(default=[], description="Specific queues to analyze")
-    hourRange: List[str] = Field(default=["08:00", "20:00"], description="Hour range [start, end]")
-    maxAttempts: int = Field(default=5, description="Maximum attempts to analyze")
+    channels: List[ChannelType] = Field( # Usar ChannelType para consistencia
+        default_factory=list, # Mejor que default=[] para listas mutables
+        description="Canales a incluir (ej: ['Voicebot', 'Call Center'])"
+    )
+    queues: List[str] = Field(
+        default_factory=list, description="Colas específicas a analizar"
+    )
+    hourRange: Optional[List[str]] = Field( # Hacer opcional si puede no estar presente
+        default=None, # Ejemplo: default=["08:00", "20:00"] si siempre se espera
+        description="Rango horario [inicio, fin] (ej: ['08:00', '20:00'])"
+    )
+    maxAttempts: Optional[int] = Field( # Hacer opcional
+        default=None, # Ejemplo: default=5 si siempre se espera
+        description="Número máximo de intentos a analizar"
+    )
 
 
 # =============================================================================
-# OPERATION SUMMARY MODELS
+# MODELOS DE RESUMEN DE OPERACIÓN (Ejemplos adicionales, no en uso actual)
 # =============================================================================
 
 class OperationSummary(FrontendCompatibleModel):
     """
-    Operation summary statistics
+    Estadísticas de resumen de la operación. (Ejemplo, no en uso actual)
     """
-    totalCalls: int = Field(description="Total calls")
-    totalEffectiveContacts: int = Field(description="Total effective contacts")
-    totalPdp: int = Field(description="Total PDPs")
-    overallCierreRate: float = Field(description="Overall closure rate")
-    peakHour: str = Field(description="Peak hour for effective contacts")
-    bestChannel: str = Field(description="Best performing channel")
-    averageAttempts: float = Field(description="Average attempts per closure")
+    totalCalls: int = Field(description="Llamadas totales")
+    totalEffectiveContacts: int = Field(description="Total de contactos efectivos")
+    totalPdp: int = Field(description="Total de PDPs (Promesas de Pago)")
+    overallCierreRate: float = Field(description="Tasa de cierre general")
+    peakHour: Optional[str] = Field(None, description="Hora pico para contactos efectivos")
+    bestChannel: Optional[ChannelType] = Field(None, description="Canal con mejor rendimiento")
+    averageAttempts: Optional[float] = Field(None, description="Promedio de intentos por cierre")
 
 
 class ChannelComparison(FrontendCompatibleModel):
     """
-    Channel comparison metrics
+    Métricas de comparación de canales. (Ejemplo, no en uso actual)
     """
-    voicebotMetrics: ChannelMetric = Field(description="Voicebot performance")
-    callCenterMetrics: ChannelMetric = Field(description="Call center performance")
-    performanceDelta: dict = Field(description="Performance differences")
-    recommendation: str = Field(description="Performance recommendation")
+    voicebotMetrics: Optional[ChannelMetric] = Field(None, description="Métricas de rendimiento del Voicebot")
+    callCenterMetrics: Optional[ChannelMetric] = Field(None, description="Métricas de rendimiento del Call Center")
+    performanceDelta: Optional[Dict[str, float]] = Field(None, description="Diferencias de rendimiento (ej: {'cierreRate_diff': 10.5})")
+    recommendation: Optional[str] = Field(None, description="Recomendación basada en el rendimiento")
+
+# Asegurar que todos los modelos tengan `alias_generator` si se usa `by_alias=True` en FastAPI y los nombres de campo Python
+# difieren de los nombres de campo JSON esperados (camelCase vs snake_case).
+# from pydantic.alias_generators import to_camel
+# class Config:
+#     alias_generator = to_camel
+#     allow_population_by_field_name = True
+#
+# Y luego añadir `Config = Config` a cada modelo Pydantic que lo necesite.
+# Por ahora, los nombres de campo parecen ser consistentes con camelCase donde se espera (FrontendCompatibleModel).
