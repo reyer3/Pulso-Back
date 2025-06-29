@@ -1,12 +1,9 @@
 """
-🚀 Production BigQuery Extractor
-Intelligent incremental extraction with automatic optimization
+🚀 Production BigQuery Extractor - FIXED ROW SERIALIZATION
+Intelligent incremental extraction with robust BigQuery row handling
 
-Features:
-- Incremental extraction with watermark management
-- Automatic query optimization and batching  
-- Robust error handling and retry logic
-- Memory-efficient streaming for large datasets
+FIXED: BigQuery row serialization and query method compatibility
+ADDED: Better error handling and row processing
 """
 
 import asyncio
@@ -30,11 +27,7 @@ class BigQueryExtractor(LoggerMixin):
     """
     Production-ready BigQuery extractor for incremental data extraction
     
-    Supports:
-    - Multiple extraction modes (incremental, full, sliding window)
-    - Automatic watermark management
-    - Query optimization and result streaming
-    - Comprehensive error handling
+    FIXED: Row serialization and query compatibility issues
     """
     
     def __init__(self, project_id: str = None):
@@ -67,44 +60,47 @@ class BigQueryExtractor(LoggerMixin):
             self.watermark_manager = await get_watermark_manager()
         return self.watermark_manager
     
-    def _build_incremental_query(
-        self, 
-        base_query: str, 
-        config: ExtractionConfig,
-        mode: ExtractionMode = ExtractionMode.INCREMENTAL,
-        since_date: Optional[datetime] = None
-    ) -> str:
+    def _serialize_bigquery_row(self, row) -> Dict[str, Any]:
         """
-        Build query with incremental filter
+        Safely convert BigQuery row to dictionary with proper serialization
         
-        Args:
-            base_query: Base SQL query with {incremental_filter} placeholder
-            config: Extraction configuration
-            mode: Extraction mode
-            since_date: Extract data since this date (if None, uses watermark)
-            
-        Returns:
-            Complete SQL query with WHERE clause
+        FIXED: Handles BigQuery row objects correctly
         """
-        if mode == ExtractionMode.FULL_REFRESH:
-            # Full refresh - no filter
-            incremental_filter = "1=1"
-        else:
-            if since_date is None:
-                # Use lookback from config for data quality
-                since_date = datetime.now(timezone.utc) - timedelta(days=config.lookback_days)
+        try:
+            # Try different approaches to convert row to dict
+            if hasattr(row, '_fields'):
+                # Named tuple style (most common)
+                row_dict = dict(zip(row._fields, row))
+            elif hasattr(row, 'items'):
+                # Dict-like object
+                row_dict = dict(row.items())
+            elif hasattr(row, 'keys') and hasattr(row, 'values'):
+                # Row with keys/values methods
+                row_dict = dict(zip(row.keys(), row.values()))
+            else:
+                # Fallback: try direct dict conversion
+                row_dict = dict(row)
             
-            # Build incremental filter
-            incremental_filter = ETLConfig.get_incremental_filter(
-                config.table_name, 
-                since_date
-            )
-        
-        # Replace placeholder in query
-        final_query = base_query.replace("{incremental_filter}", incremental_filter)
-        
-        self.logger.debug(f"Generated query for {config.table_name}:\n{final_query}")
-        return final_query
+            # Handle datetime and other special types
+            serialized_dict = {}
+            for key, value in row_dict.items():
+                if isinstance(value, datetime):
+                    serialized_dict[key] = value.isoformat()
+                elif isinstance(value, (list, tuple)):
+                    # Handle arrays/repeated fields
+                    serialized_dict[key] = list(value) if value else []
+                elif value is None:
+                    serialized_dict[key] = None
+                else:
+                    # Keep as is for primitives (str, int, float, bool)
+                    serialized_dict[key] = value
+            
+            return serialized_dict
+            
+        except Exception as e:
+            self.logger.error(f"Failed to serialize BigQuery row: {str(e)}")
+            self.logger.debug(f"Row type: {type(row)}, Row attributes: {dir(row)}")
+            raise ValueError(f"Cannot serialize BigQuery row: {str(e)}")
     
     async def _execute_query_streaming(
         self, 
@@ -114,7 +110,7 @@ class BigQueryExtractor(LoggerMixin):
         """
         Execute BigQuery query and yield results in batches
         
-        Memory-efficient streaming approach for large datasets
+        FIXED: Row serialization and error handling
         """
         client = await self._ensure_client()
         
@@ -132,6 +128,8 @@ class BigQueryExtractor(LoggerMixin):
             # Wait for job to complete with timeout
             query_job.result(timeout=self.default_timeout)
             
+            self.logger.debug(f"Query job completed. Total rows: {query_job.num_rows if query_job.num_rows else 'unknown'}")
+            
             # Stream results in batches
             total_rows = 0
             batch_count = 0
@@ -139,15 +137,17 @@ class BigQueryExtractor(LoggerMixin):
             for batch in query_job.result(page_size=batch_size):
                 batch_data = []
                 for row in batch:
-                    # Convert BigQuery row to dict
-                    row_dict = dict(row)
-                    
-                    # Handle datetime serialization
-                    for key, value in row_dict.items():
-                        if isinstance(value, datetime):
-                            row_dict[key] = value.isoformat()
-                    
-                    batch_data.append(row_dict)
+                    try:
+                        # Use improved row serialization
+                        row_dict = self._serialize_bigquery_row(row)
+                        batch_data.append(row_dict)
+                        
+                    except Exception as e:
+                        self.logger.error(f"Failed to process row: {str(e)}")
+                        # Log row details for debugging
+                        self.logger.debug(f"Problematic row type: {type(row)}")
+                        # Skip this row and continue
+                        continue
                 
                 if batch_data:
                     total_rows += len(batch_data)
@@ -175,18 +175,10 @@ class BigQueryExtractor(LoggerMixin):
         """
         Extract data for a specific table incrementally
         
-        Args:
-            table_name: Name of table to extract
-            mode: Extraction mode
-            since_date: Override since date (optional)
-            force: Force extraction even if recent
-            
-        Yields:
-            Batches of records as list of dictionaries
+        FIXED: Query generation compatibility
         """
         # Get configuration
         config = ETLConfig.get_config(table_name)
-        base_query = ETLConfig.get_query(table_name)
         
         # Generate extraction ID for tracking
         extraction_id = str(uuid.uuid4())
@@ -212,15 +204,15 @@ class BigQueryExtractor(LoggerMixin):
                     
                     since_date = last_extracted
             
-            # Build final query
-            final_query = self._build_incremental_query(
-                base_query, config, mode, since_date
-            )
+            # FIXED: Use the correct method to get formatted query
+            final_query = ETLConfig.get_query(table_name, since_date)
             
             self.logger.info(
                 f"Starting extraction for {table_name} "
                 f"(mode: {mode}, since: {since_date}, ID: {extraction_id})"
             )
+            
+            self.logger.debug(f"Executing query for {table_name}:\\n{final_query}")
             
             start_time = time.time()
             total_records = 0
@@ -357,14 +349,14 @@ class BigQueryExtractor(LoggerMixin):
             query_job = client.query(test_query, job_config=job_config)
             results = query_job.result(timeout=30)  # Short timeout for test
             
-            # Get sample data
-            sample_data = [dict(row) for row in results]
-            
-            # Serialize datetime objects
-            for row in sample_data:
-                for key, value in row.items():
-                    if isinstance(value, datetime):
-                        row[key] = value.isoformat()
+            # Get sample data using improved serialization
+            sample_data = []
+            for row in results:
+                try:
+                    serialized_row = self._serialize_bigquery_row(row)
+                    sample_data.append(serialized_row)
+                except Exception as e:
+                    self.logger.warning(f"Failed to serialize sample row: {str(e)}")
             
             return {
                 "status": "success",
