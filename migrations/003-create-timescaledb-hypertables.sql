@@ -1,19 +1,15 @@
--- Convert ETL tables to TimescaleDB hypertables for better time-series performance
+-- Convert appropriate ETL tables to TimescaleDB hypertables for better time-series performance
 -- depends: 002-enable-timescaledb
 
--- ✅ FIXED: Create hypertable for watermarks (time-based partitioning) with data migration
-SELECT create_hypertable(
-    'etl_watermarks', 
-    'last_extracted_at',
-    if_not_exists => TRUE,
-    migrate_data => TRUE,
-    chunk_time_interval => INTERVAL '1 day'
-);
+-- NOTE: etl_watermarks is NOT converted to hypertable because:
+-- 1. It's a small metadata table (one record per ETL table)
+-- 2. Primary key (id) doesn't include partitioning column (last_extracted_at)
+-- 3. Not suitable for time-series partitioning (configuration data, not time-series data)
 
 -- Create schema for ETL time-series data
 CREATE SCHEMA IF NOT EXISTS etl_timeseries;
 
--- Example: Create ETL metrics table as hypertable for monitoring
+-- Create ETL metrics table as hypertable for monitoring time-series data
 CREATE TABLE IF NOT EXISTS etl_timeseries.extraction_metrics (
     time TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     table_name TEXT NOT NULL,
@@ -26,7 +22,7 @@ CREATE TABLE IF NOT EXISTS etl_timeseries.extraction_metrics (
     metadata JSONB
 );
 
--- Convert to hypertable
+-- Convert extraction_metrics to hypertable (this is suitable for time-series)
 SELECT create_hypertable(
     'etl_timeseries.extraction_metrics', 
     'time',
@@ -56,3 +52,6 @@ SELECT
     time_column_name,
     time_interval
 FROM timescaledb_information.hypertables;
+
+-- Add comment explaining why etl_watermarks is not a hypertable
+COMMENT ON TABLE etl_watermarks IS 'ETL watermark tracking table - NOT a hypertable because it is metadata/configuration data, not time-series data';
