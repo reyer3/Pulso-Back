@@ -1,6 +1,7 @@
 """
 🔄 Raw Data Transformers - BigQuery to PostgreSQL Raw Tables
 FIXED: Column case sensitivity mapping for PostgreSQL compatibility
+FIXED: Removed field duplications that caused INSERT column mismatches
 ADDED: Debug logging for NULL primary key investigation
 
 ISSUE: 58 extracted → 58 transformed → 0 loaded (null primary key)
@@ -21,6 +22,7 @@ class RawDataTransformer(LoggerMixin):
     PRINCIPLE: Minimal transformation - just type conversion and basic cleaning
     PRESERVE: Original BigQuery data structure for business logic layer
     FIXED: Column name mapping for case sensitivity compatibility
+    FIXED: Removed field duplications that caused INSERT errors
     DEBUG: Added logging for NULL primary key investigation
     """
     
@@ -38,6 +40,7 @@ class RawDataTransformer(LoggerMixin):
         Transform BigQuery calendario to PostgreSQL raw_calendario
         
         FIXED: Column names mapped to PostgreSQL lowercase convention
+        FIXED: Removed field duplications that caused INSERT column mismatches
         DEBUG: Added logging for NULL primary key investigation
         """
         transformed_records = []
@@ -76,15 +79,12 @@ class RawDataTransformer(LoggerMixin):
                     self.transformation_stats['records_skipped'] += 1
                     continue
                 
+                # ✅ FIXED: Removed field duplications
                 transformed = {
-                    # Primary key
+                    # Primary key - ✅ FIXED: Single definition only
                     'archivo': archivo,
-                    # ✅ FIXED: Primary key - PostgreSQL column name
-                    'archivo': archivo,  # PostgreSQL: archivo (lowercase)
 
-                    # Campaign metadata - preserve original names
-                    'tipo_cartera': self._safe_string(record.get('TIPO_CARTERA')),
-                    # ✅ FIXED: Campaign metadata - mapped to PostgreSQL schema
+                    # Campaign metadata - ✅ FIXED: Single definition only
                     'tipo_cartera': self._safe_string(record.get('TIPO_CARTERA')),
 
                     # Business dates - critical for campaign logic
