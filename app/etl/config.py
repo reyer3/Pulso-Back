@@ -1,8 +1,9 @@
 """
-🎯 ETL Configuration System - CORRECTED SCHEMA VERSION
-Raw data extraction with real BigQuery column names and simplified approach
+🎯 ETL Configuration System - FILENAME DATE EXTRACTION VERSION
+Raw data extraction using real business dates from filenames (not creado_el)
 
-SCHEMA VERIFIED: All column names and types confirmed from actual BigQuery tables
+APPROACH: Extract dates from filenames for reliable incremental processing
+RELIABLE: Handles file reprocessing and data corrections
 """
 
 from datetime import datetime, timedelta
@@ -60,39 +61,39 @@ class ExtractionConfig:
 
 class ETLConfig:
     """
-    Centralized ETL configuration for Pulso Dashboard - SCHEMA CORRECTED VERSION
+    Centralized ETL configuration for Pulso Dashboard - FILENAME DATE VERSION
     
-    STRATEGY: Extract raw sources separately, transform in Python pipeline
-    VERIFIED: All column names match real BigQuery schemas
+    STRATEGY: Use filename dates for incremental extraction (not creado_el)
+    RELIABLE: Handles file reprocessing scenarios correctly
     """
     
     # 🌟 PROJECT CONFIGURATION
     PROJECT_ID = "mibot-222814"
     DATASET = "BI_USA"
     
-    # 🔄 RAW SOURCE CONFIGURATIONS - One per BigQuery table
+    # 🔄 RAW SOURCE CONFIGURATIONS - Filename-date based
     EXTRACTION_CONFIGS: Dict[str, ExtractionConfig] = {
         
-        # 📅 CALENDARIO - Campaign definitions
+        # 📅 CALENDARIO - Campaign definitions (no change needed)
         "raw_calendario": ExtractionConfig(
             table_name="raw_calendario",
             table_type=TableType.DASHBOARD,
-            description="Campaign calendar - corrected schema",
+            description="Campaign calendar - using fecha_apertura",
             primary_key=["ARCHIVO"],
-            incremental_column="fecha_apertura",
+            incremental_column="fecha_apertura",  # Real business date
             source_table="bi_P3fV4dWNeMkN5RJMhV8e_dash_calendario_v5",
             lookback_days=7,
             required_columns=["ARCHIVO", "fecha_apertura"],
             min_expected_records=1
         ),
         
-        # 👥 ASIGNACIONES - Client assignments
+        # 👥 ASIGNACIONES - Using filename date extraction
         "raw_asignaciones": ExtractionConfig(
             table_name="raw_asignaciones",
             table_type=TableType.ASSIGNMENT,
-            description="Client assignments - corrected schema",
+            description="Client assignments - using filename date extraction",
             primary_key=["cod_luna", "cuenta", "archivo"],
-            incremental_column="creado_el",
+            incremental_column="fecha_archivo",  # ✅ Extracted from filename
             source_table="batch_P3fV4dWNeMkN5RJMhV8e_asignacion",
             lookback_days=30,
             batch_size=50000,
@@ -100,13 +101,13 @@ class ETLConfig:
             min_expected_records=1
         ),
         
-        # 💰 TRANDEUDA - Daily debt snapshots
+        # 💰 TRANDEUDA - Using filename date extraction
         "raw_trandeuda": ExtractionConfig(
             table_name="raw_trandeuda", 
             table_type=TableType.DASHBOARD,
-            description="Daily debt snapshots - corrected schema",
+            description="Daily debt snapshots - using filename date extraction",
             primary_key=["cod_cuenta", "nro_documento", "archivo"],
-            incremental_column="creado_el",
+            incremental_column="fecha_archivo",  # ✅ Extracted from filename
             source_table="batch_P3fV4dWNeMkN5RJMhV8e_tran_deuda",
             lookback_days=14,
             batch_size=100000,
@@ -114,13 +115,13 @@ class ETLConfig:
             min_expected_records=1
         ),
         
-        # 💳 PAGOS - Payment transactions
+        # 💳 PAGOS - Using filename date extraction
         "raw_pagos": ExtractionConfig(
             table_name="raw_pagos",
             table_type=TableType.DASHBOARD,
-            description="Payment transactions - corrected schema", 
+            description="Payment transactions - using filename date extraction", 
             primary_key=["nro_documento", "fecha_pago", "monto_cancelado"],
-            incremental_column="creado_el",
+            incremental_column="fecha_archivo",  # ✅ Extracted from filename
             source_table="batch_P3fV4dWNeMkN5RJMhV8e_pagos",
             lookback_days=30,
             batch_size=25000,
@@ -128,13 +129,13 @@ class ETLConfig:
             min_expected_records=1
         ),
         
-        # 🤖 GESTIONES BOT - Bot management actions
+        # 🤖 GESTIONES BOT - Using real timestamp (no filename issue)
         "raw_gestiones_bot": ExtractionConfig(
             table_name="raw_gestiones_bot",
             table_type=TableType.OPERATION,
-            description="Bot gestiones - corrected schema",
+            description="Bot gestiones - using real timestamp",
             primary_key=["document", "date", "uid"],
-            incremental_column="date",
+            incremental_column="date",  # Real business timestamp
             source_table="voicebot_P3fV4dWNeMkN5RJMhV8e",
             lookback_days=5,
             batch_size=50000,
@@ -143,13 +144,13 @@ class ETLConfig:
             min_expected_records=1
         ),
         
-        # 👨‍💼 GESTIONES HUMANO - Human agent actions  
+        # 👨‍💼 GESTIONES HUMANO - Using real timestamp (no filename issue)
         "raw_gestiones_humano": ExtractionConfig(
             table_name="raw_gestiones_humano",
             table_type=TableType.PRODUCTIVITY,
-            description="Human agent gestiones - corrected schema",
+            description="Human agent gestiones - using real timestamp",
             primary_key=["document", "date", "uid"],
-            incremental_column="date",
+            incremental_column="date",  # Real business timestamp
             source_table="mibotair_P3fV4dWNeMkN5RJMhV8e",
             lookback_days=5,
             batch_size=25000,
@@ -158,26 +159,26 @@ class ETLConfig:
             min_expected_records=1
         ),
         
-        # 📞 CONTACTOS - Contact effectiveness data
+        # 📞 CONTACTOS - Using filename date extraction
         "raw_contactos": ExtractionConfig(
             table_name="raw_contactos",
             table_type=TableType.OPERATION,
-            description="Contact effectiveness master data",
+            description="Contact effectiveness - using filename date if available",
             primary_key=["cod_luna", "archivo"],
-            incremental_column="creado_el", 
+            incremental_column="creado_el",  # Keep original for now
             source_table="batch_P3fV4dWNeMkN5RJMhV8e_master_contacto",
             lookback_days=30,
             required_columns=["cod_luna", "valor_contacto"],
             min_expected_records=1
         ),
         
-        # 🎯 GESTIONES UNIFICADAS - Pre-built view with homologation
+        # 🎯 GESTIONES UNIFICADAS - Using real timestamp (no filename issue)
         "gestiones_unificadas": ExtractionConfig(
             table_name="gestiones_unificadas",
             table_type=TableType.OPERATION,
-            description="Unified gestiones view - bot + human with homologation",
+            description="Unified gestiones view - using real timestamps",
             primary_key=["cod_luna", "timestamp_gestion"],
-            incremental_column="timestamp_gestion",
+            incremental_column="timestamp_gestion",  # Real business timestamp
             source_table="bi_P3fV4dWNeMkN5RJMhV8e_vw_gestiones_unificadas", 
             lookback_days=3,
             batch_size=75000,
@@ -187,15 +188,15 @@ class ETLConfig:
         )
     }
     
-    # 🎯 SIMPLIFIED RAW EXTRACTION QUERIES - CORRECTED SCHEMA
+    # 🎯 FILENAME DATE EXTRACTION QUERIES - BUSINESS DATES NOT UPLOAD DATES
     EXTRACTION_QUERIES: Dict[str, str] = {
         
-        # 📅 CALENDARIO - Campaign calendar with CORRECT column names
+        # 📅 CALENDARIO - No change needed (fecha_apertura is business date)
         "raw_calendario": f"""
         SELECT 
             ARCHIVO,                          -- ✅ Real column name
             TIPO_CARTERA,                     -- ✅ Real column name
-            fecha_apertura,                   -- ✅ Real column name
+            fecha_apertura,                   -- ✅ Real business date
             fecha_trandeuda,                  -- ✅ Real column name  
             fecha_cierre,                     -- ✅ Real column name
             FECHA_CIERRE_PLANIFICADA,         -- ✅ Real column name
@@ -214,7 +215,7 @@ class ETLConfig:
         WHERE {{incremental_filter}}
         """,
         
-        # 👥 ASIGNACIONES - Client assignments with CORRECT column names and types
+        # 👥 ASIGNACIONES - Extract date from filename (Pattern: YYYYMMDD)
         "raw_asignaciones": f"""
         SELECT 
             CAST(cliente AS STRING) as cliente,        -- ✅ Convert INT64 to STRING
@@ -231,14 +232,17 @@ class ETLConfig:
             rango_renta,                               -- ✅ Real column name
             campania_act,                              -- ✅ Real column name
             archivo,                                   -- ✅ Real column name
-            creado_el,                                 -- ✅ Real column name
-            DATE(creado_el) as fecha_asignacion,       -- ✅ Derived date field
+            creado_el,                                 -- ✅ Technical upload time
+            
+            -- 🎯 EXTRACT BUSINESS DATE FROM FILENAME (Pattern: YYYYMMDD)
+            PARSE_DATE('%Y%m%d', REGEXP_EXTRACT(archivo, r'(\d{{8}})')) as fecha_archivo,
+            
             CURRENT_TIMESTAMP() as extraction_timestamp
         FROM `{PROJECT_ID}.{DATASET}.batch_P3fV4dWNeMkN5RJMhV8e_asignacion`
         WHERE {{incremental_filter}}
         """,
         
-        # 💰 TRANDEUDA - Debt snapshots with CORRECT column names and types
+        # 💰 TRANDEUDA - Extract date from filename (Pattern: DDMM)
         "raw_trandeuda": f"""
         SELECT 
             cod_cuenta,                                -- ✅ Real column name (STRING)
@@ -246,9 +250,16 @@ class ETLConfig:
             fecha_vencimiento,                         -- ✅ Real column name
             monto_exigible,                            -- ✅ Real column name (FLOAT64)
             archivo,                                   -- ✅ Real column name
-            creado_el,                                 -- ✅ Real column name
-            DATE(creado_el) as fecha_proceso,          -- ✅ Derived date field
+            creado_el,                                 -- ✅ Technical upload time
             motivo_rechazo,                            -- ✅ Real column name
+            
+            -- 🎯 EXTRACT BUSINESS DATE FROM FILENAME (Pattern: TRAN_DEUDA_DDMM_*)
+            DATE(CONCAT(
+                CAST(EXTRACT(YEAR FROM CURRENT_DATE()) AS STRING), '-', 
+                SUBSTR(REGEXP_EXTRACT(archivo, r'TRAN_DEUDA_(\d{{4}})_'), 3, 2), '-',
+                SUBSTR(REGEXP_EXTRACT(archivo, r'TRAN_DEUDA_(\d{{4}})_'), 1, 2)
+            )) as fecha_archivo,
+            
             CURRENT_TIMESTAMP() as extraction_timestamp
         FROM `{PROJECT_ID}.{DATASET}.batch_P3fV4dWNeMkN5RJMhV8e_tran_deuda`
         WHERE {{incremental_filter}}
@@ -256,7 +267,7 @@ class ETLConfig:
           AND motivo_rechazo IS NULL                  -- ✅ Only valid records
         """,
         
-        # 💳 PAGOS - Payment transactions with CORRECT column names
+        # 💳 PAGOS - Extract date from filename (Pattern: YYYY-MM-DD)
         "raw_pagos": f"""
         SELECT 
             cod_sistema,                               -- ✅ Real column name
@@ -264,8 +275,12 @@ class ETLConfig:
             monto_cancelado,                           -- ✅ Real column name (FLOAT64)
             fecha_pago,                                -- ✅ Real column name
             archivo,                                   -- ✅ Real column name
-            creado_el,                                 -- ✅ Real column name
+            creado_el,                                 -- ✅ Technical upload time
             motivo_rechazo,                            -- ✅ Real column name
+            
+            -- 🎯 EXTRACT BUSINESS DATE FROM FILENAME (Pattern: YYYY-MM-DD)
+            PARSE_DATE('%Y-%m-%d', REGEXP_EXTRACT(archivo, r'(\d{{4}}-\d{{2}}-\d{{2}})')) as fecha_archivo,
+            
             CURRENT_TIMESTAMP() as extraction_timestamp
         FROM `{PROJECT_ID}.{DATASET}.batch_P3fV4dWNeMkN5RJMhV8e_pagos`
         WHERE {{incremental_filter}}
@@ -273,11 +288,11 @@ class ETLConfig:
           AND motivo_rechazo IS NULL                  -- ✅ Only valid records
         """,
         
-        # 🤖 GESTIONES BOT - Bot management with CORRECT table and columns
+        # 🤖 GESTIONES BOT - No change (uses real timestamp)
         "raw_gestiones_bot": f"""
         SELECT 
             document,                                  -- ✅ Real column name (STRING)
-            date,                                      -- ✅ Real column name (DATETIME)
+            date,                                      -- ✅ Real business timestamp
             campaign_id,                               -- ✅ Real column name
             campaign_name,                             -- ✅ Real column name
             CAST(phone AS STRING) as phone,            -- ✅ Convert FLOAT64 to STRING
@@ -299,11 +314,11 @@ class ETLConfig:
         WHERE {{incremental_filter}}
         """,
         
-        # 👨‍💼 GESTIONES HUMANO - Human agent management with CORRECT table and columns
+        # 👨‍💼 GESTIONES HUMANO - No change (uses real timestamp)
         "raw_gestiones_humano": f"""
         SELECT 
             document,                                  -- ✅ Real column name (STRING)
-            date,                                      -- ✅ Real column name (DATETIME)
+            date,                                      -- ✅ Real business timestamp
             campaign_id,                               -- ✅ Real column name
             campaign_name,                             -- ✅ Real column name
             CAST(phone AS STRING) as phone,            -- ✅ Convert FLOAT64 to STRING
@@ -331,7 +346,7 @@ class ETLConfig:
           AND correo_agente IS NOT NULL              -- ✅ Only identified agents
         """,
         
-        # 📞 CONTACTOS - Contact effectiveness data
+        # 📞 CONTACTOS - Keep current approach for now
         "raw_contactos": f"""
         SELECT 
             cod_luna,                                  -- ✅ Real column name
@@ -345,12 +360,12 @@ class ETLConfig:
           AND motivo_rechazo IS NULL                  -- ✅ Only valid records
         """,
         
-        # 🎯 GESTIONES UNIFICADAS - Pre-built view with homologation (BEST FOR KPIs)
+        # 🎯 GESTIONES UNIFICADAS - No change (uses real timestamps)
         "gestiones_unificadas": f"""
         SELECT 
             CAST(cod_luna AS STRING) as cod_luna,      -- ✅ Ensure STRING type
             fecha_gestion,                             -- ✅ Real column name (DATE)
-            timestamp_gestion,                         -- ✅ Real column name (TIMESTAMP)
+            timestamp_gestion,                         -- ✅ Real business timestamp
             canal_origen,                              -- ✅ Real column name ('BOT'|'HUMANO')
             management_original,                       -- ✅ Real column name
             sub_management_original,                   -- ✅ Real column name
@@ -390,36 +405,46 @@ class ETLConfig:
     @classmethod
     def get_incremental_filter(cls, table_name: str, since_date: datetime) -> str:
         """
-        Generate incremental filter for a specific table with CORRECTED column names
+        Generate incremental filter using FILENAME DATES for reliable incremental extraction
         
         Args:
             table_name: Name of the table
             since_date: Extract data since this date
             
         Returns:
-            SQL WHERE clause for incremental extraction
+            SQL WHERE clause for incremental extraction using business dates
         """
         config = cls.get_config(table_name)
         
         # Apply lookback window for data quality
         lookback_date = since_date - timedelta(days=config.lookback_days)
         
-        # CORRECTED filters based on real column names
+        # FILENAME-BASED filters for reliable incremental extraction
         if table_name == "raw_calendario":
-            # Use real column: fecha_apertura
+            # Use real business date: fecha_apertura
             return f"fecha_apertura >= '{lookback_date.strftime('%Y-%m-%d')}'"
         elif table_name == "raw_asignaciones":
-            # Use real column: creado_el
-            return f"DATE(creado_el) >= '{lookback_date.strftime('%Y-%m-%d')}'"
-        elif table_name in ["raw_trandeuda", "raw_pagos", "raw_contactos"]:
-            # Use real column: creado_el
-            return f"DATE(creado_el) >= '{lookback_date.strftime('%Y-%m-%d')}'"
+            # Use filename-extracted date (YYYYMMDD pattern)
+            return f"PARSE_DATE('%Y%m%d', REGEXP_EXTRACT(archivo, r'(\d{{8}}))') >= '{lookback_date.strftime('%Y-%m-%d')}'"
+        elif table_name == "raw_trandeuda":
+            # Use filename-extracted date (DDMM pattern with current year)
+            return f"""DATE(CONCAT(
+                CAST(EXTRACT(YEAR FROM CURRENT_DATE()) AS STRING), '-', 
+                SUBSTR(REGEXP_EXTRACT(archivo, r'TRAN_DEUDA_(\d{{4}})_'), 3, 2), '-',
+                SUBSTR(REGEXP_EXTRACT(archivo, r'TRAN_DEUDA_(\d{{4}})_'), 1, 2)
+            )) >= '{lookback_date.strftime('%Y-%m-%d')}'"""
+        elif table_name == "raw_pagos":
+            # Use filename-extracted date (YYYY-MM-DD pattern)
+            return f"PARSE_DATE('%Y-%m-%d', REGEXP_EXTRACT(archivo, r'(\d{{4}}-\d{{2}}-\d{{2}})')) >= '{lookback_date.strftime('%Y-%m-%d')}'"
         elif table_name in ["raw_gestiones_bot", "raw_gestiones_humano"]:
-            # Use real column: date (DATETIME)
+            # Use real business timestamps (no filename issue)
             return f"DATE(date) >= '{lookback_date.strftime('%Y-%m-%d')}'"
         elif table_name == "gestiones_unificadas":
-            # Use real column: timestamp_gestion (TIMESTAMP)
+            # Use real business timestamps (no filename issue)
             return f"DATE(timestamp_gestion) >= '{lookback_date.strftime('%Y-%m-%d')}'"
+        elif table_name == "raw_contactos":
+            # Keep original approach for now
+            return f"DATE(creado_el) >= '{lookback_date.strftime('%Y-%m-%d')}'"
         else:
             # Default fallback
             return f"DATE(creado_el) >= '{lookback_date.strftime('%Y-%m-%d')}'"
@@ -434,10 +459,19 @@ class ETLConfig:
         """Get core tables needed for dashboard calculation"""
         return [
             "raw_calendario",           # Campaign definitions
-            "raw_asignaciones",         # Client assignments
-            "raw_trandeuda",           # Debt snapshots
-            "raw_pagos",               # Payments
+            "raw_asignaciones",         # Client assignments (filename date)
+            "raw_trandeuda",           # Debt snapshots (filename date)
+            "raw_pagos",               # Payments (filename date)
             "gestiones_unificadas"     # All gestiones with homologation
+        ]
+    
+    @classmethod
+    def get_filename_based_tables(cls) -> List[str]:
+        """Get tables that use filename date extraction"""
+        return [
+            "raw_asignaciones",         # YYYYMMDD pattern
+            "raw_trandeuda",           # DDMM pattern
+            "raw_pagos"                # YYYY-MM-DD pattern
         ]
     
     @classmethod
@@ -448,6 +482,7 @@ class ETLConfig:
 
 # 🎯 CONVENIENCE CONSTANTS FOR EASY IMPORTS
 DASHBOARD_TABLES = ETLConfig.get_dashboard_tables()
+FILENAME_BASED_TABLES = ETLConfig.get_filename_based_tables()
 RAW_SOURCE_TABLES = ETLConfig.get_raw_source_tables()
 ALL_TABLES = ETLConfig.list_tables()
 
