@@ -1,9 +1,9 @@
 """
-🎯 ETL Configuration System - SCHEMA CORRECTED VERSION
-Fixed with real BigQuery field names from actual tables
+🎯 ETL Configuration System - PRIMARY KEYS UPDATED FOR TIMESCALEDB
+Fixed with TimescaleDB-compatible primary keys including partition columns
 
-ISSUE FIXED: Updated all field names to match actual BigQuery schema
-TESTED: All queries now use confirmed field names from DESCRIBE results
+ISSUE FIXED: Updated primary keys to include time partition columns  
+TESTED: Primary keys now compatible with TimescaleDB hypertable requirements
 """
 
 from datetime import datetime, timedelta
@@ -37,7 +37,7 @@ class ExtractionConfig:
     table_type: TableType
     description: str
     
-    # Primary key configuration
+    # Primary key configuration - ✅ UPDATED FOR TIMESCALEDB
     primary_key: List[str]
     incremental_column: str
     
@@ -61,25 +61,25 @@ class ExtractionConfig:
 
 class ETLConfig:
     """
-    Centralized ETL configuration for Pulso Dashboard - SCHEMA CORRECTED VERSION
+    Centralized ETL configuration for Pulso Dashboard - TIMESCALEDB PRIMARY KEYS FIXED
     
-    STRATEGY: Using REAL BigQuery field names from DESCRIBE results
-    FIXED: All field names match actual BigQuery schema
+    STRATEGY: Using TimescaleDB-compatible primary keys that include partition columns
+    FIXED: All primary keys now include time dimensions for hypertable compatibility
     """
     
     # 🌟 PROJECT CONFIGURATION
     PROJECT_ID = "mibot-222814"
     DATASET = "BI_USA"
     
-    # 🔄 RAW SOURCE CONFIGURATIONS
+    # 🔄 RAW SOURCE CONFIGURATIONS - ✅ PRIMARY KEYS UPDATED
     EXTRACTION_CONFIGS: Dict[str, ExtractionConfig] = {
         
-        # 📅 CALENDARIO
+        # 📅 CALENDARIO - ✅ PK INCLUDES periodo_date
         "raw_calendario": ExtractionConfig(
             table_name="raw_calendario",
             table_type=TableType.DASHBOARD,
             description="Campaign calendar",
-            primary_key=["ARCHIVO"],
+            primary_key=["ARCHIVO", "periodo_date"],  # ✅ FIXED: Includes partition column
             incremental_column="fecha_apertura",
             source_table="bi_P3fV4dWNeMkN5RJMhV8e_dash_calendario_v5",
             lookback_days=7,
@@ -87,12 +87,12 @@ class ETLConfig:
             min_expected_records=1
         ),
         
-        # 👥 ASIGNACIONES
+        # 👥 ASIGNACIONES - ✅ PK INCLUDES fecha_asignacion
         "raw_asignaciones": ExtractionConfig(
             table_name="raw_asignaciones",
             table_type=TableType.ASSIGNMENT,
             description="Client assignments",
-            primary_key=["cod_luna", "cuenta", "archivo"],
+            primary_key=["cod_luna", "cuenta", "archivo", "fecha_asignacion"],  # ✅ FIXED: Includes partition column
             incremental_column="creado_el",
             source_table="batch_P3fV4dWNeMkN5RJMhV8e_asignacion",
             lookback_days=30,
@@ -101,12 +101,12 @@ class ETLConfig:
             min_expected_records=1
         ),
         
-        # 💰 TRANDEUDA
+        # 💰 TRANDEUDA - ✅ PK INCLUDES fecha_proceso
         "raw_trandeuda": ExtractionConfig(
             table_name="raw_trandeuda", 
             table_type=TableType.DASHBOARD,
             description="Daily debt snapshots",
-            primary_key=["cod_cuenta", "nro_documento", "archivo"],
+            primary_key=["cod_cuenta", "nro_documento", "archivo", "fecha_proceso"],  # ✅ FIXED: Includes partition column
             incremental_column="creado_el",
             source_table="batch_P3fV4dWNeMkN5RJMhV8e_tran_deuda",
             lookback_days=14,
@@ -115,12 +115,12 @@ class ETLConfig:
             min_expected_records=1
         ),
         
-        # 💳 PAGOS
+        # 💳 PAGOS - ✅ PK ALREADY INCLUDES fecha_pago (correct from start)
         "raw_pagos": ExtractionConfig(
             table_name="raw_pagos",
             table_type=TableType.DASHBOARD,
             description="Payment transactions", 
-            primary_key=["nro_documento", "fecha_pago", "monto_cancelado"],
+            primary_key=["nro_documento", "fecha_pago", "monto_cancelado"],  # ✅ Already correct
             incremental_column="creado_el",
             source_table="batch_P3fV4dWNeMkN5RJMhV8e_pagos",
             lookback_days=30,
@@ -129,12 +129,12 @@ class ETLConfig:
             min_expected_records=1
         ),
         
-        # 🎯 GESTIONES UNIFICADAS
+        # 🎯 GESTIONES UNIFICADAS - ✅ PK ALREADY INCLUDES timestamp_gestion (correct from start)
         "gestiones_unificadas": ExtractionConfig(
             table_name="gestiones_unificadas",
             table_type=TableType.OPERATION,
             description="Unified gestiones view",
-            primary_key=["cod_luna", "timestamp_gestion"],
+            primary_key=["cod_luna", "timestamp_gestion"],  # ✅ Already correct
             incremental_column="timestamp_gestion",
             source_table="bi_P3fV4dWNeMkN5RJMhV8e_vw_gestiones_unificadas", 
             lookback_days=3,
@@ -164,7 +164,7 @@ class ETLConfig:
             RANGO_VENCIMIENTO,                 -- ✅ Real field name
             ESTADO_CARTERA,                    -- ✅ Real field name
             periodo_mes,                       -- ✅ Real field name
-            periodo_date,                      -- ✅ Real field name
+            periodo_date,                      -- ✅ Real field name (partition column)
             tipo_ciclo_campana,                -- ✅ Real field name
             categoria_duracion,                -- ✅ Real field name
             CURRENT_TIMESTAMP() as extraction_timestamp
@@ -190,7 +190,7 @@ class ETLConfig:
             campania_act,                              -- ✅ Real field name
             archivo,                                   -- ✅ Real field name
             creado_el,                                 -- ✅ Real field name
-            DATE(creado_el) as fecha_asignacion,       -- ✅ Derived from creado_el
+            DATE(creado_el) as fecha_asignacion,       -- ✅ Derived from creado_el (partition column)
             CURRENT_TIMESTAMP() as extraction_timestamp
         FROM `mibot-222814.BI_USA.batch_P3fV4dWNeMkN5RJMhV8e_asignacion`
         WHERE {incremental_filter}
@@ -205,7 +205,7 @@ class ETLConfig:
             monto_exigible,                            -- ✅ Real field name (FLOAT64)
             archivo,                                   -- ✅ Real field name
             creado_el,                                 -- ✅ Real field name
-            DATE(creado_el) as fecha_proceso,          -- ✅ Derived from creado_el
+            DATE(creado_el) as fecha_proceso,          -- ✅ Derived from creado_el (partition column)
             motivo_rechazo,                            -- ✅ Real field name
             CURRENT_TIMESTAMP() as extraction_timestamp
         FROM `mibot-222814.BI_USA.batch_P3fV4dWNeMkN5RJMhV8e_tran_deuda`
@@ -220,7 +220,7 @@ class ETLConfig:
             cod_sistema,                               -- ✅ Real field name (STRING)
             nro_documento,                             -- ✅ Real field name
             monto_cancelado,                           -- ✅ Real field name (FLOAT64)
-            fecha_pago,                                -- ✅ Real field name
+            fecha_pago,                                -- ✅ Real field name (partition column)
             archivo,                                   -- ✅ Real field name
             creado_el,                                 -- ✅ Real field name
             motivo_rechazo,                            -- ✅ Real field name
@@ -236,7 +236,7 @@ class ETLConfig:
         SELECT 
             CAST(cod_luna AS STRING) as cod_luna,      -- ✅ Real field name (INT64 → STRING)
             fecha_gestion,                             -- ✅ Real field name (DATE)
-            timestamp_gestion,                         -- ✅ Real field name (TIMESTAMP)
+            timestamp_gestion,                         -- ✅ Real field name (TIMESTAMP, partition column)
             canal_origen,                              -- ✅ Real field name ('BOT'|'HUMANO')
             management_original,                       -- ✅ Real field name
             sub_management_original,                   -- ✅ Real field name
