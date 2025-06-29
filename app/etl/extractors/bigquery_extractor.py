@@ -1,8 +1,8 @@
 """
-🚀 Production BigQuery Extractor - FIXED ROW SERIALIZATION
+🚀 Production BigQuery Extractor - FIXED QueryJob.num_rows ISSUE
 Intelligent incremental extraction with robust BigQuery row handling
 
-FIXED: BigQuery row serialization and query method compatibility
+FIXED: QueryJob.num_rows AttributeError - use query_job.result().total_rows instead
 ADDED: Better error handling and row processing
 """
 
@@ -26,7 +26,7 @@ class BigQueryExtractor(LoggerMixin):
     """
     Production-ready BigQuery extractor for incremental data extraction
     
-    FIXED: Row serialization and query compatibility issues
+    FIXED: QueryJob.num_rows AttributeError
     """
     
     def __init__(self, project_id: str = None):
@@ -109,7 +109,7 @@ class BigQueryExtractor(LoggerMixin):
         """
         Execute BigQuery query and yield results in batches
         
-        FIXED: Row serialization and error handling
+        FIXED: QueryJob.num_rows AttributeError and error handling
         """
         client = await self._ensure_client()
         
@@ -125,17 +125,23 @@ class BigQueryExtractor(LoggerMixin):
             query_job = client.query(query, job_config=job_config)
             
             # Wait for job to complete with timeout
-            query_job.result(timeout=self.default_timeout)
+            query_result = query_job.result(timeout=self.default_timeout)
             
-            self.logger.debug(f"Query job completed. Total rows: {query_job.num_rows if query_job.num_rows else 'unknown'}")
+            # FIXED: Get total rows from query result, not query job
+            try:
+                total_rows = query_result.total_rows if hasattr(query_result, 'total_rows') else 'unknown'
+                self.logger.debug(f"Query job completed. Total rows: {total_rows}")
+            except Exception as e:
+                self.logger.debug(f"Could not get total rows count: {str(e)}")
             
             # Stream results in batches
-            total_rows = 0
+            total_processed = 0
             batch_count = 0
             
-            for batch in query_job.result(page_size=batch_size):
+            # Process results in pages/batches
+            for page in query_result.pages:
                 batch_data = []
-                for row in batch:
+                for row in page:
                     try:
                         # Use improved row serialization
                         row_dict = self._serialize_bigquery_row(row)
@@ -149,13 +155,17 @@ class BigQueryExtractor(LoggerMixin):
                         continue
                 
                 if batch_data:
-                    total_rows += len(batch_data)
+                    total_processed += len(batch_data)
                     batch_count += 1
                     
                     self.logger.debug(f"Yielding batch {batch_count} with {len(batch_data)} rows")
                     yield batch_data
+                    
+                    # Respect batch size limits
+                    if len(batch_data) >= batch_size:
+                        break
             
-            self.logger.info(f"Query completed: {total_rows} rows in {batch_count} batches")
+            self.logger.info(f"Query completed: {total_processed} rows processed in {batch_count} batches")
             
         except GoogleCloudError as e:
             self.logger.error(f"BigQuery error: {str(e)}")
