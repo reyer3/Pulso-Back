@@ -7,20 +7,19 @@ ADDED: Better error handling and row processing
 """
 
 import asyncio
-import uuid
-from datetime import datetime, timezone, timedelta
-from typing import List, Dict, Any, Optional, AsyncGenerator, Union
-import logging
 import time
+import uuid
+from datetime import datetime, timezone
+from typing import List, Dict, Any, Optional, AsyncGenerator
 
+import pandas as pd
+from google.auth import default
 from google.cloud import bigquery
 from google.cloud.exceptions import GoogleCloudError
-from google.auth import default
-import pandas as pd
 
-from app.etl.config import ETLConfig, ExtractionConfig, ExtractionMode
-from app.etl.watermarks import get_watermark_manager, WatermarkManager
 from app.core.logging import LoggerMixin
+from app.etl.config import ETLConfig, ExtractionMode
+from app.etl.watermarks import get_watermark_manager, WatermarkManager
 
 
 class BigQueryExtractor(LoggerMixin):
@@ -408,29 +407,7 @@ class BigQueryExtractor(LoggerMixin):
                 "error": str(e)
             }
     
-    async def cleanup_failed_extractions(self) -> Dict[str, Any]:
-        """Clean up stale/failed extractions"""
-        watermark_manager = await self._ensure_watermark_manager()
-        
-        # Clean up stale running extractions
-        stale_count = await watermark_manager.cleanup_stale_extractions(
-            timeout_minutes=30
-        )
-        
-        # Get current status
-        failed_extractions = await watermark_manager.get_failed_extractions()
-        running_extractions = await watermark_manager.get_running_extractions()
-        
-        return {
-            "stale_extractions_cleaned": stale_count,
-            "current_failed_count": len(failed_extractions),
-            "current_running_count": len(running_extractions),
-            "failed_tables": [ext.table_name for ext in failed_extractions],
-            "running_tables": [ext.table_name for ext in running_extractions]
-        }
-
-
-# 🎯 Convenience functions for easy imports
+    # 🎯 Convenience functions for easy imports
 async def get_extractor() -> BigQueryExtractor:
     """Get configured BigQuery extractor instance"""
     return BigQueryExtractor()

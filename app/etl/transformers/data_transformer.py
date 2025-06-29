@@ -7,17 +7,13 @@ COMPATIBILITY: Existing code continues to work without changes
 """
 
 # Import only what we need to avoid circular imports
-from app.etl.transformers.unified_transformer import (
-    get_unified_transformer_registry,
-    UnifiedTransformerRegistry,
-    transform_raw_data,
-    transform_mart_data,
-    process_campaign_window
-)
+from app.core.logging import LoggerMixin
+
 
 # ✅ FIXED: Define get_transformer_registry locally (no circular import)
 def get_transformer_registry():
     """Get transformer registry - now returns unified version"""
+    from app.etl.transformers.unified_transformer import get_unified_transformer_registry
     return get_unified_transformer_registry()
 
 # Legacy DataTransformer class for backwards compatibility

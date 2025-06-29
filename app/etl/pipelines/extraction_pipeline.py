@@ -524,9 +524,6 @@ class ETLPipeline(LoggerMixin):
         """Clean up failed extractions and attempt recovery"""
         await self._ensure_components()
         
-        # Cleanup stale extractions
-        cleanup_result = await self.extractor.cleanup_failed_extractions()
-        
         # Get failed extractions
         failed_extractions = await self.watermark_manager.get_failed_extractions()
         
@@ -559,7 +556,6 @@ class ETLPipeline(LoggerMixin):
                 })
         
         return {
-            "cleanup": cleanup_result,
             "recovery_attempts": recovery_attempts,
             "recovered_tables": [
                 attempt["table_name"] 

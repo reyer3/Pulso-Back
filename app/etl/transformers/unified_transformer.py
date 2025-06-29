@@ -13,8 +13,8 @@ FIXED: Pipeline now supports all table types correctly
 from typing import List, Dict, Any, Optional
 from app.etl.transformers.raw_data_transformer import get_raw_transformer_registry, RawTransformerRegistry
 from app.etl.transformers.business_logic_transformer import get_business_transformer, BusinessLogicTransformer
-from app.etl.transformers.data_transformer import get_transformer_registry as get_mart_transformer_registry, TransformerRegistry
 from app.core.logging import LoggerMixin
+
 
 
 class UnifiedTransformerRegistry(LoggerMixin):
@@ -25,13 +25,13 @@ class UnifiedTransformerRegistry(LoggerMixin):
     - Mart tables (final dashboard consumption)
     """
     
-    def __init__(self):
+    def __init__(self, mart_transformer):
         super().__init__()
         
         # Initialize all transformer layers
         self.raw_transformer: RawTransformerRegistry = get_raw_transformer_registry()
         self.business_transformer: BusinessLogicTransformer = get_business_transformer()
-        self.mart_transformer: TransformerRegistry = get_mart_transformer_registry()
+        self.mart_transformer = mart_transformer
         
         # Combined mapping of all supported tables
         self.all_transformers = {
@@ -175,7 +175,9 @@ def get_unified_transformer_registry() -> UnifiedTransformerRegistry:
     global _unified_transformer
     
     if _unified_transformer is None:
-        _unified_transformer = UnifiedTransformerRegistry()
+        from app.etl.transformers.data_transformer import get_transformer_registry as get_mart_transformer_registry
+        mart_transformer = get_mart_transformer_registry()
+        _unified_transformer = UnifiedTransformerRegistry(mart_transformer)
     
     return _unified_transformer
 
