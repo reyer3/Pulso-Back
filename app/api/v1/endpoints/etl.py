@@ -10,7 +10,7 @@ Features:
 - Cancel running extractions
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 import asyncio
 
@@ -238,7 +238,7 @@ class ETLAPI(LoggerMixin):
             for watermark in running_tables:
                 await watermark_manager.update_watermark(
                     table_name=watermark.table_name,
-                    last_extracted_date=None,
+                    timestamp=datetime.now(timezone.utc),
                     records_extracted=0,
                     status='cancelled',
                     error_message='Manually cancelled via API'
@@ -287,7 +287,7 @@ class ETLAPI(LoggerMixin):
             if watermark and watermark.last_extraction_status in ['running', 'started']:
                 await watermark_manager.update_watermark(
                     table_name=table_name,
-                    last_extracted_date=None,
+                    timestamp=datetime.now(timezone.utc),
                     records_extracted=0,
                     status='cancelled',
                     error_message=f'Manually cancelled via API at {datetime.now()}'
@@ -337,15 +337,22 @@ class ETLAPI(LoggerMixin):
             all_watermarks = await watermark_manager.get_all_watermarks()
             reset_count = len(all_watermarks)
             
-            # Reset all watermarks
+            # Use a fixed early date to force full refresh on next extraction
+            reset_timestamp = datetime(2020, 1, 1, tzinfo=timezone.utc)
+            
+            # Reset all watermarks to force full refresh
             for watermark in all_watermarks:
-                await watermark_manager.reset_watermark(watermark.table_name)
+                await watermark_manager.reset_watermark(
+                    table_name=watermark.table_name,
+                    timestamp=reset_timestamp  # ✅ FIXED: Include required timestamp argument
+                )
             
             return success_response(
                 message="ETL system reset completed",
                 data={
                     "reset_tables": reset_count,
                     "reset_at": datetime.now().isoformat(),
+                    "reset_timestamp": reset_timestamp.isoformat(),
                     "warning": "All tables will be fully refreshed on next extraction"
                 }
             )
