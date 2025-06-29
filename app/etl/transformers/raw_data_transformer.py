@@ -1,9 +1,9 @@
 """
 🔄 Raw Data Transformers - BigQuery to PostgreSQL Raw Tables
-Minimal transformation for staging BigQuery data into PostgreSQL raw tables
+FIXED: Column case sensitivity mapping for PostgreSQL compatibility
 
-APPROACH: Light transformation, preserve original data for business logic layer
-PURPOSE: Create staging layer for complex business transformations
+ISSUE: BigQuery uses UPPERCASE columns, PostgreSQL schema uses lowercase
+SOLUTION: Explicit column name mapping to match PostgreSQL schema
 """
 
 from datetime import datetime, date, timezone
@@ -19,6 +19,7 @@ class RawDataTransformer(LoggerMixin):
     
     PRINCIPLE: Minimal transformation - just type conversion and basic cleaning
     PRESERVE: Original BigQuery data structure for business logic layer
+    FIXED: Column name mapping for case sensitivity compatibility
     """
     
     def __init__(self):
@@ -34,7 +35,7 @@ class RawDataTransformer(LoggerMixin):
         """
         Transform BigQuery calendario to PostgreSQL raw_calendario
         
-        MINIMAL: Type conversion + basic validation only
+        FIXED: Column names mapped to PostgreSQL lowercase convention
         """
         transformed_records = []
         
@@ -49,25 +50,25 @@ class RawDataTransformer(LoggerMixin):
                     continue
                 
                 transformed = {
-                    # Primary key
-                    'ARCHIVO': archivo,
+                    # ✅ FIXED: Primary key - PostgreSQL column name
+                    'archivo': archivo,  # PostgreSQL: archivo (lowercase)
                     
-                    # Campaign metadata - preserve original names
-                    'TIPO_CARTERA': self._safe_string(record.get('TIPO_CARTERA')),
+                    # ✅ FIXED: Campaign metadata - mapped to PostgreSQL schema
+                    'tipo_cartera': self._safe_string(record.get('TIPO_CARTERA')),
                     
                     # Business dates - critical for campaign logic
                     'fecha_apertura': self._safe_date(record.get('fecha_apertura')),
                     'fecha_trandeuda': self._safe_date(record.get('fecha_trandeuda')),
                     'fecha_cierre': self._safe_date(record.get('fecha_cierre')),
-                    'FECHA_CIERRE_PLANIFICADA': self._safe_date(record.get('FECHA_CIERRE_PLANIFICADA')),
+                    'fecha_cierre_planificada': self._safe_date(record.get('FECHA_CIERRE_PLANIFICADA')),
                     
                     # Campaign characteristics
-                    'DURACION_CAMPANA_DIAS_HABILES': self._safe_int(record.get('DURACION_CAMPANA_DIAS_HABILES')),
-                    'ANNO_ASIGNACION': self._safe_int(record.get('ANNO_ASIGNACION')),
-                    'PERIODO_ASIGNACION': self._safe_string(record.get('PERIODO_ASIGNACION')),
-                    'ES_CARTERA_ABIERTA': self._safe_bool(record.get('ES_CARTERA_ABIERTA')),
-                    'RANGO_VENCIMIENTO': self._safe_string(record.get('RANGO_VENCIMIENTO')),
-                    'ESTADO_CARTERA': self._safe_string(record.get('ESTADO_CARTERA')),
+                    'duracion_campana_dias_habiles': self._safe_int(record.get('DURACION_CAMPANA_DIAS_HABILES')),
+                    'anno_asignacion': self._safe_int(record.get('ANNO_ASIGNACION')),
+                    'periodo_asignacion': self._safe_string(record.get('PERIODO_ASIGNACION')),
+                    'es_cartera_abierta': self._safe_bool(record.get('ES_CARTERA_ABIERTA')),
+                    'rango_vencimiento': self._safe_string(record.get('RANGO_VENCIMIENTO')),
+                    'estado_cartera': self._safe_string(record.get('ESTADO_CARTERA')),
                     
                     # Time partitioning
                     'periodo_mes': self._safe_string(record.get('periodo_mes')),
@@ -100,7 +101,7 @@ class RawDataTransformer(LoggerMixin):
         """
         Transform BigQuery asignaciones to PostgreSQL raw_asignaciones
         
-        MINIMAL: Type conversion + key field validation
+        FIXED: Column names mapped to PostgreSQL lowercase convention
         """
         transformed_records = []
         
