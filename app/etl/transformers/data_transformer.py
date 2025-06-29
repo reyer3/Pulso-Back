@@ -1,22 +1,21 @@
 """
-🔄 Data Transformer - COMPATIBILITY LAYER
+🔄 Data Transformer - COMPATIBILITY LAYER - CIRCULAR IMPORT FIXED
 Maintains compatibility while redirecting to UnifiedTransformerRegistry
 
-UPDATED: Now uses UnifiedTransformerRegistry for complete pipeline support
+UPDATED: Removed circular import by defining get_transformer_registry locally
 COMPATIBILITY: Existing code continues to work without changes
 """
 
-# Re-export everything from unified_transformer to maintain compatibility
+# Import only what we need to avoid circular imports
 from app.etl.transformers.unified_transformer import (
     get_unified_transformer_registry,
-    get_transformer_registry,
     UnifiedTransformerRegistry,
     transform_raw_data,
     transform_mart_data,
     process_campaign_window
 )
 
-# Legacy compatibility - redirect to unified transformer
+# ✅ FIXED: Define get_transformer_registry locally (no circular import)
 def get_transformer_registry():
     """Get transformer registry - now returns unified version"""
     return get_unified_transformer_registry()
