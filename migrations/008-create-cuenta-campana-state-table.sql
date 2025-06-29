@@ -30,11 +30,13 @@ CREATE INDEX idx_cuenta_campana_fecha_apertura ON cuenta_campana_state(fecha_ape
 CREATE INDEX idx_cuenta_campana_cod_luna ON cuenta_campana_state(cod_luna);
 CREATE INDEX idx_cuenta_campana_gestionable ON cuenta_campana_state(es_cuenta_gestionable) WHERE es_cuenta_gestionable = TRUE;
 
--- TimescaleDB hypertable for time-series performance
-SELECT create_hypertable('cuenta_campana_state', by_range('fecha_apertura', INTERVAL '7 days'), if_not_exists => TRUE);
+-- NOTE: cuenta_campana_state is NOT converted to hypertable because:
+-- 1. It's account state data per campaign (configuration/lookup table)
+-- 2. Primary key doesn't include partitioning column (fecha_apertura)  
+-- 3. Not high-volume time-series data - it's business state data
 
 -- Comments for documentation
-COMMENT ON TABLE cuenta_campana_state IS 'Tracks account states within campaign windows for accurate metric calculation';
+COMMENT ON TABLE cuenta_campana_state IS 'Tracks account states within campaign windows for accurate metric calculation - NOT a hypertable (state data, not time-series)';
 COMMENT ON COLUMN cuenta_campana_state.archivo IS 'Campaign file identifier from calendario table';
 COMMENT ON COLUMN cuenta_campana_state.cod_luna IS 'Client identifier (can have multiple accounts)';
 COMMENT ON COLUMN cuenta_campana_state.cuenta IS 'Specific account identifier';
