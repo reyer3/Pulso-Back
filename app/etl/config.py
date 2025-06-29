@@ -1,11 +1,15 @@
 """
-🎯 ETL Configuration System - FIXED Business Logic
-Corrected separation between Assignment vs Management logic
+🎯 ETL Configuration System - RAW SOURCES VERSION
+Direct queries to raw BigQuery tables without intermediate views
 
-CRITICAL FIX: Assignment ≠ Management
-- Assignments come from calendario + asignaciones + cuentas  
-- Management happens on "gestionable" clients only
-- Gestionability = Assigned + Has debt >= 1 + Came in trandeuda
+APPROACH: Build dashboard data directly from raw sources:
+- batch_..._asignacion: Assignment data
+- batch_..._tran_deuda: Daily debt snapshots  
+- batch_..._pagos: Payment transactions
+- voicebot_...: Bot management data
+- mibotair_...: Human agent management data
+- homologacion_...: Business rules mapping
+- bi_..._dash_calendario_v5: Campaign calendar
 """
 
 from datetime import datetime, timedelta
@@ -63,18 +67,15 @@ class ExtractionConfig:
 
 class ETLConfig:
     """
-    Centralized ETL configuration for Pulso Dashboard
+    Centralized ETL configuration for Pulso Dashboard - RAW SOURCES VERSION
     
-    CORRECTED: Proper separation of Assignment vs Management logic
-    - Assignments = Calendar + Asignaciones + Cuentas + Trandeuda (state)
-    - Management = Gestiones on "gestionable" clients only
-    - Payments = Independent but linked to cuentas
+    DIRECT QUERIES to raw BigQuery tables without intermediate views.
+    All business logic is built directly from source tables.
     """
     
     # 🌟 PROJECT CONFIGURATION
     PROJECT_ID = "mibot-222814"
     DATASET = "BI_USA"
-    VIEW_PREFIX = "bi_P3fV4dWNeMkN5RJMhV8e_vw"
     
     # 🔄 EXTRACTION CONFIGURATIONS
     EXTRACTION_CONFIGS: Dict[str, ExtractionConfig] = {
@@ -83,13 +84,12 @@ class ETLConfig:
         "dashboard_data": ExtractionConfig(
             table_name="dashboard_data",
             table_type=TableType.DASHBOARD,
-            description="Main dashboard metrics - Assignment-based with Management overlay",
-            primary_key=["fecha_foto", "archivo", "cartera", "servicio"],
+            description="Main dashboard metrics built from raw sources",
+            primary_key=["fecha_foto", "campaign_name", "cartera", "servicio"],
             incremental_column="fecha_foto",
-            source_view=f"{VIEW_PREFIX}_dashboard_cobranzas",
             lookback_days=7,
             required_columns=[
-                "fecha_foto", "archivo", "cartera", "servicio", 
+                "fecha_foto", "campaign_name", "cartera", "servicio", 
                 "cuentas", "clientes", "deuda_asig", "recupero"
             ],
             min_expected_records=100
@@ -99,54 +99,50 @@ class ETLConfig:
         "evolution_data": ExtractionConfig(
             table_name="evolution_data", 
             table_type=TableType.EVOLUTION,
-            description="Time series data for trending charts",
-            primary_key=["fecha_foto", "archivo"],
+            description="Time series data from raw sources",
+            primary_key=["fecha_foto", "campaign_name"],
             incremental_column="fecha_foto",
-            source_view=f"{VIEW_PREFIX}_dashboard_cobranzas",
             lookback_days=3,
             batch_size=50000,
-            required_columns=["fecha_foto", "archivo", "pct_cober", "pct_contac", "pct_efectividad"],
+            required_columns=["fecha_foto", "campaign_name", "pct_cober", "pct_contac", "pct_efectividad"],
             min_expected_records=50
         ),
         
-        # 📋 ASSIGNMENT ANALYSIS - BASED ON ASSIGNMENTS NOT MANAGEMENT
+        # 📋 ASSIGNMENT ANALYSIS
         "assignment_data": ExtractionConfig(
             table_name="assignment_data",
             table_type=TableType.ASSIGNMENT,
-            description="Assignment analysis - from Calendar + Asignaciones + Cuentas",
-            primary_key=["periodo", "archivo", "cartera"],
-            incremental_column="fecha_asignacion_real",  # From assignment, not management
-            source_view=f"{VIEW_PREFIX}_asignaciones_clean",
+            description="Assignment analysis from raw batch data",
+            primary_key=["periodo", "campaign_name", "cartera"],
+            incremental_column="fecha_asignacion",
             lookback_days=30,
             refresh_frequency_hours=24,
-            required_columns=["periodo", "archivo", "cartera", "cuentas", "clientes", "deuda_asig"],
+            required_columns=["periodo", "campaign_name", "cartera", "cuentas", "clientes", "deuda_asig"],
             min_expected_records=20
         ),
         
-        # ⚡ OPERATION HOURLY DATA - MANAGEMENT ONLY
+        # ⚡ OPERATION HOURLY DATA
         "operation_data": ExtractionConfig(
             table_name="operation_data",
             table_type=TableType.OPERATION,
-            description="Hourly operational metrics - Management actions only",
-            primary_key=["fecha_foto", "hora", "canal", "cola"],
+            description="Hourly operational metrics from raw management data",
+            primary_key=["fecha_foto", "hora", "canal", "campaign_name"],
             incremental_column="fecha_foto",
-            source_view=f"{VIEW_PREFIX}_gestiones_unificadas",
             lookback_days=2,
             batch_size=5000,
             refresh_frequency_hours=2,
             max_execution_time_minutes=15,
-            required_columns=["fecha_foto", "hora", "canal", "cola", "total_gestiones"],
+            required_columns=["fecha_foto", "hora", "canal", "campaign_name", "total_gestiones"],
             min_expected_records=10
         ),
         
-        # 👥 PRODUCTIVITY DATA - AGENT MANAGEMENT PERFORMANCE
+        # 👥 PRODUCTIVITY DATA
         "productivity_data": ExtractionConfig(
             table_name="productivity_data",
             table_type=TableType.PRODUCTIVITY, 
-            description="Agent productivity - Management performance only",
+            description="Agent productivity from raw management data",
             primary_key=["fecha_foto", "correo_agente", "hora"],
             incremental_column="fecha_foto",
-            source_view=f"{VIEW_PREFIX}_gestiones_unificadas",
             lookback_days=5,
             refresh_frequency_hours=8,
             required_columns=["fecha_foto", "correo_agente", "nombre_agente", "total_gestiones"],
@@ -159,242 +155,378 @@ class ETLConfig:
     MAX_RETRY_ATTEMPTS = 3
     RETRY_DELAY_SECONDS = 30
     
-    # 🎯 EXTRACTION QUERIES - CORRECTED BUSINESS LOGIC
+    # 🎯 EXTRACTION QUERIES - BUILT FROM RAW SOURCES
     EXTRACTION_QUERIES: Dict[str, str] = {
         
         "dashboard_data": f"""
-        -- ✅ CORRECTED: Dashboard from Assignment base + Management overlay
+        -- 📊 DASHBOARD DATA - Built from RAW sources
+        WITH calendario_base AS (
+            SELECT 
+                ARCHIVO as campaign_file,
+                REGEXP_EXTRACT(ARCHIVO, r'([^/]+)\.txt$') as campaign_name,
+                FECHA_ASIGNACION as fecha_apertura,
+                COALESCE(FECHA_CIERRE, CURRENT_DATE()) as fecha_cierre,
+                TIPO_CARTERA as cartera_tipo,
+                RANGO_VENCIMIENTO
+            FROM `{PROJECT_ID}.{DATASET}.bi_P3fV4dWNeMkN5RJMhV8e_dash_calendario_v5`
+            WHERE FECHA_ASIGNACION IS NOT NULL
+        ),
+        
+        fechas_expansion AS (
+            SELECT 
+                cb.*,
+                fecha_foto
+            FROM calendario_base cb
+            CROSS JOIN UNNEST(
+                GENERATE_DATE_ARRAY(cb.fecha_apertura, cb.fecha_cierre, INTERVAL 1 DAY)
+            ) as fecha_foto
+        ),
+        
+        asignaciones_base AS (
+            SELECT 
+                a.archivo,
+                REGEXP_EXTRACT(a.archivo, r'([^/]+)\.txt$') as campaign_name,
+                a.cod_luna,
+                a.cuenta,
+                DATE(a.creado_el) as fecha_asignacion_real,
+                CASE
+                    WHEN CONTAINS_SUBSTR(UPPER(COALESCE(a.archivo, '')), 'TEMPRANA') THEN 'TEMPRANA'
+                    WHEN CONTAINS_SUBSTR(UPPER(COALESCE(a.archivo, '')), 'CF_ANN') THEN 'CUOTA_FRACCIONAMIENTO'
+                    WHEN CONTAINS_SUBSTR(UPPER(COALESCE(a.archivo, '')), 'AN') THEN 'ALTAS_NUEVAS'
+                    ELSE 'OTRAS'
+                END AS cartera,
+                IF(a.negocio="MOVIL", a.negocio, "FIJA") as servicio
+            FROM `{PROJECT_ID}.{DATASET}.batch_P3fV4dWNeMkN5RJMhV8e_asignacion` a
+            WHERE DATE(a.creado_el) >= DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY)
+        ),
+        
+        deuda_diaria AS (
+            SELECT 
+                CAST(d.cod_cuenta AS STRING) as cuenta,
+                DATE(d.creado_el) as fecha_trandeuda,
+                d.nro_documento,
+                SUM(d.monto_exigible) as monto_exigible_diario
+            FROM `{PROJECT_ID}.{DATASET}.batch_P3fV4dWNeMkN5RJMhV8e_tran_deuda` d
+            WHERE DATE(d.creado_el) >= DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY)
+              AND d.monto_exigible > 0
+            GROUP BY 1,2,3
+        ),
+        
+        gestiones_bot AS (
+            SELECT 
+                SAFE_CAST(vb.document AS INT64) AS cod_luna,
+                DATE(vb.date) AS fecha_gestion,
+                vb.campaign_name,
+                hv.contactabilidad_homologada as contactabilidad,
+                CASE WHEN hv.es_pdp_homologado = 1 THEN 1 ELSE 0 END as es_compromiso,
+                CASE WHEN hv.contactabilidad_homologada = 'Contacto Efectivo' THEN 1 ELSE 0 END as es_contacto_efectivo
+            FROM `{PROJECT_ID}.{DATASET}.voicebot_P3fV4dWNeMkN5RJMhV8e` vb
+            LEFT JOIN `{PROJECT_ID}.{DATASET}.homologacion_P3fV4dWNeMkN5RJMhV8e_voicebot` hv
+                ON vb.management = hv.bot_management 
+                AND COALESCE(vb.sub_management, '') = COALESCE(hv.bot_sub_management, '')
+                AND COALESCE(vb.compromiso, '') = COALESCE(hv.bot_compromiso, '')
+            WHERE DATE(vb.date) >= DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY)
+              AND vb.campaign_name IS NOT NULL
+        ),
+        
+        gestiones_humano AS (
+            SELECT 
+                SAFE_CAST(mh.document AS INT64) AS cod_luna,
+                DATE(mh.date) AS fecha_gestion,
+                mh.campaign_name,
+                hh.contactabilidad as contactabilidad,
+                CASE WHEN hh.pdp IN ('1', 'SI') THEN 1 ELSE 0 END as es_compromiso,
+                CASE WHEN hh.contactabilidad = 'Contacto Efectivo' THEN 1 ELSE 0 END as es_contacto_efectivo
+            FROM `{PROJECT_ID}.{DATASET}.mibotair_P3fV4dWNeMkN5RJMhV8e` mh
+            LEFT JOIN `{PROJECT_ID}.{DATASET}.homologacion_P3fV4dWNeMkN5RJMhV8e_v2` hh
+                ON mh.n1 = hh.n_1 
+                AND mh.n2 = hh.n_2 
+                AND mh.n3 = hh.n_3
+            WHERE DATE(mh.date) >= DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY)
+              AND mh.campaign_name IS NOT NULL
+        ),
+        
+        gestiones_unificadas AS (
+            SELECT * FROM gestiones_bot
+            UNION ALL
+            SELECT * FROM gestiones_humano
+        ),
+        
+        pagos_clean AS (
+            SELECT 
+                p.nro_documento,
+                p.fecha_pago,
+                SUM(p.monto_cancelado) as monto_cancelado
+            FROM `{PROJECT_ID}.{DATASET}.batch_P3fV4dWNeMkN5RJMhV8e_pagos` p
+            WHERE p.fecha_pago >= DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY)
+              AND p.monto_cancelado > 0
+            GROUP BY 1,2
+        ),
+        
+        dashboard_base AS (
+            SELECT 
+                fe.fecha_foto,
+                fe.campaign_name,
+                ab.cartera,
+                ab.servicio,
+                
+                -- Métricas base de asignación
+                COUNT(DISTINCT ab.cuenta) as cuentas,
+                COUNT(DISTINCT ab.cod_luna) as clientes,
+                SUM(COALESCE(dd.monto_exigible_diario, 0)) as deuda_asig,
+                
+                -- Métricas de gestión
+                COUNT(DISTINCT CASE WHEN gu.cod_luna IS NOT NULL THEN ab.cuenta END) as cuentas_gestionadas,
+                COUNT(DISTINCT CASE WHEN gu.es_contacto_efectivo = 1 THEN ab.cuenta END) as cuentas_cd,
+                COUNT(DISTINCT CASE WHEN gu.contactabilidad = 'Contacto No Efectivo' THEN ab.cuenta END) as cuentas_ci,
+                COUNT(DISTINCT CASE WHEN gu.es_compromiso = 1 THEN ab.cuenta END) as cuentas_pdp,
+                COUNT(gu.cod_luna) as total_gestiones,
+                
+                -- Métricas de recupero
+                COALESCE(SUM(pc.monto_cancelado), 0) as recupero,
+                COUNT(DISTINCT CASE WHEN pc.monto_cancelado > 0 THEN ab.cuenta END) as cuentas_pagadoras
+                
+            FROM fechas_expansion fe
+            INNER JOIN asignaciones_base ab
+                ON fe.campaign_name = ab.campaign_name
+            LEFT JOIN deuda_diaria dd
+                ON ab.cuenta = dd.cuenta
+                AND fe.fecha_foto = dd.fecha_trandeuda
+            LEFT JOIN gestiones_unificadas gu
+                ON ab.cod_luna = gu.cod_luna
+                AND ab.campaign_name = gu.campaign_name
+                AND gu.fecha_gestion <= fe.fecha_foto
+                AND gu.fecha_gestion >= ab.fecha_asignacion_real
+            LEFT JOIN pagos_clean pc
+                ON dd.nro_documento = pc.nro_documento
+                AND pc.fecha_pago <= fe.fecha_foto
+                AND pc.fecha_pago >= ab.fecha_asignacion_real
+            
+            WHERE {{incremental_filter}}
+            GROUP BY 1,2,3,4
+            HAVING cuentas > 0
+        )
+        
         SELECT 
             fecha_foto,
-            archivo,
+            campaign_name,
             cartera,
             servicio,
             cuentas,
-            clientes, 
+            clientes,
             deuda_asig,
-            deuda_act,
             cuentas_gestionadas,
             cuentas_cd,
             cuentas_ci,
-            cuentas_sc,
-            cuentas_sg,
             cuentas_pdp,
             recupero,
-            pct_cober,
-            pct_contac,
-            pct_cd,
-            pct_ci,
-            pct_conversion,
-            pct_efectividad,
-            pct_cierre,
-            inten,
+            cuentas_pagadoras,
+            total_gestiones,
+            
+            -- KPIs calculados
+            SAFE_DIVIDE(cuentas_gestionadas, cuentas) * 100 as pct_cober,
+            SAFE_DIVIDE(cuentas_cd + cuentas_ci, cuentas_gestionadas) * 100 as pct_contac,
+            SAFE_DIVIDE(cuentas_cd, cuentas_cd + cuentas_ci) * 100 as pct_cd,
+            SAFE_DIVIDE(cuentas_ci, cuentas_cd + cuentas_ci) * 100 as pct_ci,
+            SAFE_DIVIDE(cuentas_pdp, cuentas_cd) * 100 as pct_conversion,
+            SAFE_DIVIDE(total_gestiones, cuentas_gestionadas) as inten,
+            SAFE_DIVIDE(recupero, deuda_asig) * 100 as pct_efectividad,
+            SAFE_DIVIDE(cuentas_pagadoras, cuentas) * 100 as pct_cierre,
+            
             CURRENT_TIMESTAMP() as fecha_procesamiento
-        FROM `{PROJECT_ID}.{DATASET}.{VIEW_PREFIX}_dashboard_cobranzas`
-        WHERE {{incremental_filter}}
-        ORDER BY fecha_foto DESC, archivo, cartera, servicio
+            
+        FROM dashboard_base
+        ORDER BY fecha_foto DESC, campaign_name, cartera, servicio
         """,
         
         "evolution_data": f"""
-        -- ✅ CORRECTED: Evolution from Assignment base
+        -- 📈 EVOLUTION DATA - Simplified from dashboard query
+        WITH dashboard_simplified AS (
+            -- Reuse the dashboard logic but only for evolution metrics
+            SELECT 
+                fe.fecha_foto,
+                fe.campaign_name,
+                ab.cartera,
+                ab.servicio,
+                COUNT(DISTINCT ab.cuenta) as cuentas,
+                COUNT(DISTINCT CASE WHEN gu.cod_luna IS NOT NULL THEN ab.cuenta END) as cuentas_gestionadas,
+                COUNT(DISTINCT CASE WHEN gu.es_contacto_efectivo = 1 THEN ab.cuenta END) as cuentas_cd,
+                COUNT(DISTINCT CASE WHEN gu.contactabilidad = 'Contacto No Efectivo' THEN ab.cuenta END) as cuentas_ci,
+                COALESCE(SUM(pc.monto_cancelado), 0) as recupero,
+                SUM(COALESCE(dd.monto_exigible_diario, 0)) as deuda_asig
+            FROM (
+                SELECT 
+                    REGEXP_EXTRACT(ARCHIVO, r'([^/]+)\.txt$') as campaign_name,
+                    fecha_foto
+                FROM `{PROJECT_ID}.{DATASET}.bi_P3fV4dWNeMkN5RJMhV8e_dash_calendario_v5` cb
+                CROSS JOIN UNNEST(
+                    GENERATE_DATE_ARRAY(cb.FECHA_ASIGNACION, COALESCE(cb.FECHA_CIERRE, CURRENT_DATE()), INTERVAL 1 DAY)
+                ) as fecha_foto
+                WHERE cb.FECHA_ASIGNACION IS NOT NULL
+            ) fe
+            INNER JOIN (
+                SELECT 
+                    REGEXP_EXTRACT(archivo, r'([^/]+)\.txt$') as campaign_name,
+                    cod_luna, cuenta,
+                    CASE
+                        WHEN CONTAINS_SUBSTR(UPPER(COALESCE(archivo, '')), 'TEMPRANA') THEN 'TEMPRANA'
+                        WHEN CONTAINS_SUBSTR(UPPER(COALESCE(archivo, '')), 'CF_ANN') THEN 'CUOTA_FRACCIONAMIENTO' 
+                        ELSE 'OTRAS'
+                    END AS cartera,
+                    IF(negocio="MOVIL", negocio, "FIJA") as servicio
+                FROM `{PROJECT_ID}.{DATASET}.batch_P3fV4dWNeMkN5RJMhV8e_asignacion`
+                WHERE DATE(creado_el) >= DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY)
+            ) ab ON fe.campaign_name = ab.campaign_name
+            LEFT JOIN (
+                SELECT 
+                    CAST(cod_cuenta AS STRING) as cuenta,
+                    DATE(creado_el) as fecha_trandeuda,
+                    nro_documento,
+                    SUM(monto_exigible) as monto_exigible_diario
+                FROM `{PROJECT_ID}.{DATASET}.batch_P3fV4dWNeMkN5RJMhV8e_tran_deuda`
+                WHERE DATE(creado_el) >= DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY)
+                GROUP BY 1,2,3
+            ) dd ON ab.cuenta = dd.cuenta AND fe.fecha_foto = dd.fecha_trandeuda
+            LEFT JOIN (
+                SELECT cod_luna, fecha_gestion, campaign_name, es_contacto_efectivo, contactabilidad
+                FROM (
+                    SELECT 
+                        SAFE_CAST(document AS INT64) AS cod_luna,
+                        DATE(date) AS fecha_gestion,
+                        campaign_name,
+                        CASE WHEN hv.contactabilidad_homologada = 'Contacto Efectivo' THEN 1 ELSE 0 END as es_contacto_efectivo,
+                        hv.contactabilidad_homologada as contactabilidad
+                    FROM `{PROJECT_ID}.{DATASET}.voicebot_P3fV4dWNeMkN5RJMhV8e` vb
+                    LEFT JOIN `{PROJECT_ID}.{DATASET}.homologacion_P3fV4dWNeMkN5RJMhV8e_voicebot` hv
+                        ON vb.management = hv.bot_management
+                    WHERE DATE(date) >= DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY)
+                    UNION ALL
+                    SELECT 
+                        SAFE_CAST(document AS INT64) AS cod_luna,
+                        DATE(date) AS fecha_gestion,
+                        campaign_name,
+                        CASE WHEN hh.contactabilidad = 'Contacto Efectivo' THEN 1 ELSE 0 END as es_contacto_efectivo,
+                        hh.contactabilidad
+                    FROM `{PROJECT_ID}.{DATASET}.mibotair_P3fV4dWNeMkN5RJMhV8e` mh
+                    LEFT JOIN `{PROJECT_ID}.{DATASET}.homologacion_P3fV4dWNeMkN5RJMhV8e_v2` hh
+                        ON mh.n1 = hh.n_1 AND mh.n2 = hh.n_2 AND mh.n3 = hh.n_3
+                    WHERE DATE(date) >= DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY)
+                )
+            ) gu ON ab.cod_luna = gu.cod_luna AND ab.campaign_name = gu.campaign_name AND gu.fecha_gestion <= fe.fecha_foto
+            LEFT JOIN (
+                SELECT nro_documento, fecha_pago, SUM(monto_cancelado) as monto_cancelado
+                FROM `{PROJECT_ID}.{DATASET}.batch_P3fV4dWNeMkN5RJMhV8e_pagos`
+                WHERE fecha_pago >= DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY)
+                GROUP BY 1,2
+            ) pc ON dd.nro_documento = pc.nro_documento AND pc.fecha_pago <= fe.fecha_foto
+            
+            WHERE {{incremental_filter}}
+            GROUP BY 1,2,3,4
+        )
+        
         SELECT 
             fecha_foto,
-            archivo,
+            campaign_name,
             cartera,
             servicio,
-            pct_cober,
-            pct_contac,
-            pct_efectividad,
-            pct_cierre,
+            SAFE_DIVIDE(cuentas_gestionadas, cuentas) * 100 as pct_cober,
+            SAFE_DIVIDE(cuentas_cd + cuentas_ci, cuentas_gestionadas) * 100 as pct_contac,
+            SAFE_DIVIDE(recupero, deuda_asig) * 100 as pct_efectividad,
+            SAFE_DIVIDE(cuentas_cd + cuentas_ci, cuentas) * 100 as pct_cierre,
             recupero,
             cuentas,
             CURRENT_TIMESTAMP() as fecha_procesamiento
-        FROM `{PROJECT_ID}.{DATASET}.{VIEW_PREFIX}_dashboard_cobranzas`
-        WHERE {{incremental_filter}}
-        ORDER BY fecha_foto DESC, archivo
+        FROM dashboard_simplified
+        WHERE cuentas > 0
+        ORDER BY fecha_foto DESC, campaign_name
         """,
         
         "assignment_data": f"""
-        -- ✅ CORRECTED: Pure Assignment analysis - NO management mixing
-        WITH asignacion_base AS (
-            SELECT 
-                ac.archivo,
-                ac.fecha_asignacion_real,
-                ac.cartera,
-                ac.negocio as servicio,
-                ac.cod_luna,
-                ac.cuenta,
-                ac.deuda_inicial,
-                ac.monto_exigible_diario as deuda_actual,
-                ac.estado_deudor,
-                EXTRACT(YEAR FROM ac.fecha_asignacion_real) as anno,
-                FORMAT_DATE('%Y-%m', ac.fecha_asignacion_real) as periodo
-            FROM `{PROJECT_ID}.{DATASET}.{VIEW_PREFIX}_asignaciones_clean` ac
-            WHERE {{incremental_filter}}
-        ),
-        
-        pagos_por_cuenta AS (
-            SELECT 
-                p.nro_documento,
-                SUM(p.monto_cancelado) as monto_recuperado
-            FROM `{PROJECT_ID}.{DATASET}.{VIEW_PREFIX}_pagos_unicos` p
-            WHERE p.fecha_pago >= DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY)
-            GROUP BY p.nro_documento
-        )
-        
+        -- 📋 ASSIGNMENT DATA - Monthly aggregation from raw sources
         SELECT 
-            ab.periodo,
-            ab.archivo,
-            ab.cartera,
-            ab.servicio,
-            
-            -- Assignment metrics (not management)
-            COUNT(DISTINCT ab.cuenta) as cuentas,
-            COUNT(DISTINCT ab.cod_luna) as clientes,
-            SUM(ab.deuda_inicial) as deuda_asig,
-            SUM(ab.deuda_actual) as deuda_actual,
-            AVG(ab.deuda_inicial) as ticket_promedio,
-            
-            -- Gestionability analysis
-            COUNT(DISTINCT CASE WHEN ab.estado_deudor = 'GESTIONABLE' THEN ab.cuenta END) as cuentas_gestionables,
-            COUNT(DISTINCT CASE WHEN ab.estado_deudor = 'NO_VINO_EN_TRANDEUDA' THEN ab.cuenta END) as cuentas_sin_trandeuda,
-            COUNT(DISTINCT CASE WHEN ab.estado_deudor = 'DEUDA_MENOR_1' THEN ab.cuenta END) as cuentas_deuda_menor,
-            COUNT(DISTINCT CASE WHEN ab.estado_deudor = 'SIN_MORA' THEN ab.cuenta END) as cuentas_sin_mora,
-            COUNT(DISTINCT CASE WHEN ab.estado_deudor = 'NO_VENCIDO' THEN ab.cuenta END) as cuentas_no_vencidas,
-            
-            -- Recovery (independent of management)
-            COALESCE(SUM(ppc.monto_recuperado), 0) as recupero_total,
-            
+            FORMAT_DATE('%Y-%m', DATE(a.creado_el)) as periodo,
+            REGEXP_EXTRACT(a.archivo, r'([^/]+)\.txt$') as campaign_name,
+            CASE
+                WHEN CONTAINS_SUBSTR(UPPER(COALESCE(a.archivo, '')), 'TEMPRANA') THEN 'TEMPRANA'
+                WHEN CONTAINS_SUBSTR(UPPER(COALESCE(a.archivo, '')), 'CF_ANN') THEN 'CUOTA_FRACCIONAMIENTO'
+                ELSE 'OTRAS'
+            END AS cartera,
+            IF(a.negocio="MOVIL", a.negocio, "FIJA") as servicio,
+            COUNT(DISTINCT a.cuenta) as cuentas,
+            COUNT(DISTINCT a.cod_luna) as clientes,
+            AVG(COALESCE(d.monto_exigible, 0)) as ticket_promedio,
+            SUM(COALESCE(d.monto_exigible, 0)) as deuda_asig,
             CURRENT_TIMESTAMP() as fecha_procesamiento
-            
-        FROM asignacion_base ab
-        LEFT JOIN pagos_por_cuenta ppc
-            ON CAST(ab.cuenta AS STRING) = ppc.nro_documento
+        FROM `{PROJECT_ID}.{DATASET}.batch_P3fV4dWNeMkN5RJMhV8e_asignacion` a
+        LEFT JOIN `{PROJECT_ID}.{DATASET}.batch_P3fV4dWNeMkN5RJMhV8e_tran_deuda` d
+            ON CAST(a.cuenta AS STRING) = d.cod_cuenta
+            AND DATE(a.creado_el) = DATE(d.creado_el)
+        WHERE {{incremental_filter}}
         GROUP BY 1,2,3,4
-        ORDER BY periodo DESC, archivo
+        ORDER BY periodo DESC, campaign_name
         """,
         
         "operation_data": f"""
-        -- ✅ CORRECTED: Pure Management operations analysis
-        WITH gestiones_base AS (
-            SELECT 
-                DATE(g.timestamp_gestion) as fecha_foto,
-                EXTRACT(HOUR FROM g.timestamp_gestion) as hora,
-                g.canal_origen as canal,
-                g.campaign_name as cola,
-                g.cod_luna,
-                g.es_contacto_efectivo,
-                g.es_compromiso,
-                ROW_NUMBER() OVER (
-                    PARTITION BY g.cod_luna, DATE(g.timestamp_gestion) 
-                    ORDER BY g.timestamp_gestion
-                ) as numero_intento
-            FROM `{PROJECT_ID}.{DATASET}.{VIEW_PREFIX}_gestiones_unificadas` g
-            WHERE {{incremental_filter}}
-        )
+        -- ⚡ OPERATION DATA - Hourly breakdown from raw management data
+        SELECT 
+            DATE(date) as fecha_foto,
+            EXTRACT(HOUR FROM date) as hora,
+            'BOT' as canal,
+            campaign_name,
+            COUNT(*) as total_gestiones,
+            SUM(CASE WHEN hv.contactabilidad_homologada = 'Contacto Efectivo' THEN 1 ELSE 0 END) as contactos_efectivos,
+            SUM(CASE WHEN hv.es_pdp_homologado = 1 THEN 1 ELSE 0 END) as total_pdp,
+            CURRENT_TIMESTAMP() as fecha_procesamiento
+        FROM `{PROJECT_ID}.{DATASET}.voicebot_P3fV4dWNeMkN5RJMhV8e` vb
+        LEFT JOIN `{PROJECT_ID}.{DATASET}.homologacion_P3fV4dWNeMkN5RJMhV8e_voicebot` hv
+            ON vb.management = hv.bot_management
+        WHERE {{incremental_filter}}
+          AND campaign_name IS NOT NULL
+        GROUP BY 1,2,3,4
+        
+        UNION ALL
         
         SELECT 
-            fecha_foto,
-            hora,
-            canal,
-            cola,
-            numero_intento,
-            
-            -- Management metrics only
+            DATE(date) as fecha_foto,
+            EXTRACT(HOUR FROM date) as hora,
+            'HUMANO' as canal,
+            campaign_name,
             COUNT(*) as total_gestiones,
-            SUM(CASE WHEN es_contacto_efectivo THEN 1 ELSE 0 END) as contactos_efectivos,
-            COUNT(*) - SUM(CASE WHEN es_contacto_efectivo THEN 1 ELSE 0 END) as contactos_no_efectivos,
-            SUM(CASE WHEN es_compromiso THEN 1 ELSE 0 END) as total_pdp,
-            
-            -- Performance calculations
-            SAFE_DIVIDE(
-                SUM(CASE WHEN es_compromiso THEN 1 ELSE 0 END),
-                SUM(CASE WHEN es_contacto_efectivo THEN 1 ELSE 0 END)
-            ) * 100 as tasa_cierre,
-            
+            SUM(CASE WHEN hh.contactabilidad = 'Contacto Efectivo' THEN 1 ELSE 0 END) as contactos_efectivos,
+            SUM(CASE WHEN hh.pdp IN ('1', 'SI') THEN 1 ELSE 0 END) as total_pdp,
             CURRENT_TIMESTAMP() as fecha_procesamiento
-            
-        FROM gestiones_base
-        GROUP BY 1,2,3,4,5
-        ORDER BY fecha_foto DESC, hora, canal, cola
+        FROM `{PROJECT_ID}.{DATASET}.mibotair_P3fV4dWNeMkN5RJMhV8e` mh
+        LEFT JOIN `{PROJECT_ID}.{DATASET}.homologacion_P3fV4dWNeMkN5RJMhV8e_v2` hh
+            ON mh.n1 = hh.n_1 AND mh.n2 = hh.n_2 AND mh.n3 = hh.n_3
+        WHERE {{incremental_filter}}
+          AND campaign_name IS NOT NULL
+        GROUP BY 1,2,3,4
+        ORDER BY fecha_foto DESC, hora, canal
         """,
         
         "productivity_data": f"""
-        -- ✅ CORRECTED: Pure Agent productivity in Management
-        WITH gestiones_agente AS (
-            SELECT 
-                DATE(g.timestamp_gestion) as fecha_foto,
-                EXTRACT(HOUR FROM g.timestamp_gestion) as hora,
-                g.correo_agente,
-                CASE 
-                    WHEN g.canal_origen = 'HUMANO' THEN g.nombre_agente
-                    WHEN g.canal_origen = 'BOT' THEN 'SISTEMA_BOT'
-                    ELSE 'AGENTE_DESCONOCIDO'
-                END as nombre_agente,
-                g.cod_luna,
-                g.es_contacto_efectivo,
-                g.es_compromiso,
-                g.peso_gestion
-            FROM `{PROJECT_ID}.{DATASET}.{VIEW_PREFIX}_gestiones_unificadas` g
-            WHERE {{incremental_filter}}
-              AND g.correo_agente IS NOT NULL
-        ),
-        
-        -- Recovery attribution: Only link payments that happened AFTER management
-        pagos_atribuibles AS (
-            SELECT 
-                p.fecha_pago,
-                p.nro_documento,
-                SUM(p.monto_cancelado) as monto_recuperado
-            FROM `{PROJECT_ID}.{DATASET}.{VIEW_PREFIX}_pagos_unicos` p
-            WHERE p.fecha_pago >= DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY)
-            GROUP BY 1,2
-        ),
-        
-        -- Link payments to agents who managed those clients
-        recupero_por_agente AS (
-            SELECT 
-                ga.fecha_foto,
-                ga.correo_agente,
-                SUM(pa.monto_recuperado) as monto_recuperado
-            FROM gestiones_agente ga
-            INNER JOIN pagos_atribuibles pa
-                ON CAST(ga.cod_luna AS STRING) = pa.nro_documento
-                AND pa.fecha_pago >= ga.fecha_foto  -- Payment after management
-                AND pa.fecha_pago <= DATE_ADD(ga.fecha_foto, INTERVAL 7 DAY)  -- Within 7 days
-            GROUP BY 1,2
-        )
-        
+        -- 👥 PRODUCTIVITY DATA - Agent performance from raw data
         SELECT 
-            ga.fecha_foto,
-            ga.hora,
-            ga.correo_agente,
-            ga.nombre_agente,
-            
-            -- Agent performance metrics
+            DATE(date) as fecha_foto,
+            EXTRACT(HOUR FROM date) as hora,
+            correo_agente,
+            COALESCE(hu.nombre_completo, 'AGENTE_DESCONOCIDO') as nombre_agente,
             COUNT(*) as total_gestiones,
-            SUM(CASE WHEN ga.es_contacto_efectivo THEN 1 ELSE 0 END) as contactos_efectivos,
-            SUM(CASE WHEN ga.es_compromiso THEN 1 ELSE 0 END) as total_pdp,
-            SUM(ga.peso_gestion) as peso_total,
-            COALESCE(rpa.monto_recuperado, 0) as monto_recuperado,
-            
-            -- Performance ratios
+            SUM(CASE WHEN hh.contactabilidad = 'Contacto Efectivo' THEN 1 ELSE 0 END) as contactos_efectivos,
+            SUM(CASE WHEN hh.pdp IN ('1', 'SI') THEN 1 ELSE 0 END) as total_pdp,
             SAFE_DIVIDE(
-                SUM(CASE WHEN ga.es_contacto_efectivo THEN 1 ELSE 0 END),
+                SUM(CASE WHEN hh.contactabilidad = 'Contacto Efectivo' THEN 1 ELSE 0 END),
                 COUNT(*)
             ) * 100 as tasa_contacto,
-            
-            SAFE_DIVIDE(
-                SUM(CASE WHEN ga.es_compromiso THEN 1 ELSE 0 END),
-                SUM(CASE WHEN ga.es_contacto_efectivo THEN 1 ELSE 0 END)
-            ) * 100 as tasa_conversion,
-            
             CURRENT_TIMESTAMP() as fecha_procesamiento
-            
-        FROM gestiones_agente ga
-        LEFT JOIN recupero_por_agente rpa
-            ON ga.fecha_foto = rpa.fecha_foto
-            AND ga.correo_agente = rpa.correo_agente
-        GROUP BY 1,2,3,4,9  -- Include monto_recuperado in GROUP BY
+        FROM `{PROJECT_ID}.{DATASET}.mibotair_P3fV4dWNeMkN5RJMhV8e` mh
+        LEFT JOIN `{PROJECT_ID}.{DATASET}.homologacion_P3fV4dWNeMkN5RJMhV8e_v2` hh
+            ON mh.n1 = hh.n_1 AND mh.n2 = hh.n_2 AND mh.n3 = hh.n_3
+        LEFT JOIN `{PROJECT_ID}.{DATASET}.homologacion_P3fV4dWNeMkN5RJMhV8e_usuarios` hu
+            ON mh.correo_agente = hu.usuario
+        WHERE {{incremental_filter}}
+          AND correo_agente IS NOT NULL
+        GROUP BY 1,2,3,4
         HAVING total_gestiones > 0
         ORDER BY fecha_foto DESC, hora, correo_agente
         """
@@ -427,18 +559,23 @@ class ETLConfig:
             SQL WHERE clause for incremental extraction
         """
         config = cls.get_config(table_name)
-        incremental_col = config.incremental_column
         
         # Apply lookback window for data quality
         lookback_date = since_date - timedelta(days=config.lookback_days)
         
         # Different filter logic based on table type
         if config.table_type == TableType.ASSIGNMENT:
-            # Assignment uses assignment date, not management date
-            return f"fecha_asignacion_real >= '{lookback_date.strftime('%Y-%m-%d')}'"
+            # Assignment uses creation date
+            return f"DATE(a.creado_el) >= '{lookback_date.strftime('%Y-%m-%d')}'"
+        elif config.table_type == TableType.OPERATION:
+            # Operation uses management date
+            return f"DATE(date) >= '{lookback_date.strftime('%Y-%m-%d')}'"
+        elif config.table_type == TableType.PRODUCTIVITY:
+            # Productivity uses management date
+            return f"DATE(date) >= '{lookback_date.strftime('%Y-%m-%d')}'"
         else:
-            # Management tables use management/processing date
-            return f"{incremental_col} >= '{lookback_date.strftime('%Y-%m-%d')}'"
+            # Dashboard and evolution use foto date
+            return f"fe.fecha_foto >= '{lookback_date.strftime('%Y-%m-%d')}'"
     
     @classmethod
     def list_tables(cls) -> List[str]:
