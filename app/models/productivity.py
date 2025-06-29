@@ -43,7 +43,7 @@ class ProductivityRequest(BaseModel):
     # maxAgents: int = Field(default=50, description="Máximo de agentes a incluir")
 
     class Config:
-        anystr_strip_whitespace = True
+        str_strip_whitespace = True
 
 
 # =============================================================================

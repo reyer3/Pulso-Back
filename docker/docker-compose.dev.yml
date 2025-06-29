@@ -32,10 +32,10 @@ services:
     ports:
       - "8001:8001"
 
-  postgres:
-    ports:
-      - "5432:5432"
-
+#  postgres:
+#    ports:
+#      - "5432:5432"
+#
   redis:
     image: redis:7-alpine
     container_name: pulso-redis-dev

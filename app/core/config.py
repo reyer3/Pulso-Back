@@ -78,7 +78,7 @@ class Settings(BaseSettings):
     
     # Logging
     LOG_FORMAT: str = Field(default="json")
-    LOG_FILE_PATH: Optional[str] = Field(default=None)
+    LOG_FILE_PATH: Optional[str] = Field(default="logs/app.log")
     LOG_MAX_SIZE_MB: int = Field(default=100)
     LOG_BACKUP_COUNT: int = Field(default=5)
     
