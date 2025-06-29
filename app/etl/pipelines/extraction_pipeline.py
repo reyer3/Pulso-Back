@@ -7,6 +7,7 @@ Features:
 - Support for single table or multi-table operations
 - Comprehensive monitoring and status reporting
 - Production-ready transaction management
+- FIXED: Now supports all table types (raw + mart + business logic)
 """
 
 import asyncio
@@ -19,7 +20,7 @@ from contextlib import asynccontextmanager
 
 from app.etl.config import ETLConfig, ExtractionConfig, ExtractionMode
 from app.etl.extractors.bigquery_extractor import BigQueryExtractor
-from app.etl.transformers.data_transformer import get_transformer_registry, TransformerRegistry
+from app.etl.transformers.unified_transformer import get_unified_transformer_registry, UnifiedTransformerRegistry
 from app.etl.loaders.postgres_loader import PostgresLoader, LoadResult
 from app.etl.watermarks import get_watermark_manager, WatermarkManager
 from app.core.logging import LoggerMixin
@@ -91,16 +92,17 @@ class ETLPipeline(LoggerMixin):
     
     Orchestrates the complete Extract-Transform-Load process with:
     - Intelligent incremental processing
-    - Data transformation and validation
+    - Data transformation and validation  
     - Error handling and recovery
     - Comprehensive monitoring
     - Transaction consistency
+    - FIXED: Full support for 3-layer transformation pipeline
     """
     
     def __init__(self):
         super().__init__()
         self.extractor: Optional[BigQueryExtractor] = None
-        self.transformer: Optional[TransformerRegistry] = None
+        self.transformer: Optional[UnifiedTransformerRegistry] = None
         self.loader: Optional[PostgresLoader] = None
         self.watermark_manager: Optional[WatermarkManager] = None
         
@@ -114,7 +116,8 @@ class ETLPipeline(LoggerMixin):
             self.extractor = BigQueryExtractor()
         
         if self.transformer is None:
-            self.transformer = get_transformer_registry()
+            self.transformer = get_unified_transformer_registry()
+            self.logger.info(f"✅ Unified transformer initialized with {len(self.transformer.get_supported_tables())} supported tables")
         
         if self.loader is None:
             self.loader = PostgresLoader()
@@ -142,7 +145,7 @@ class ETLPipeline(LoggerMixin):
                 continue
             
             try:
-                # Transform the batch
+                # Transform the batch using unified transformer
                 transformed_batch = self.transformer.transform_table_data(table_name, raw_batch)
                 
                 if transformed_batch:
@@ -215,7 +218,7 @@ class ETLPipeline(LoggerMixin):
                 pipeline_result.load_results[table_name] = load_result
                 pipeline_result.transformation_stats[table_name] = transformation_stats
                 pipeline_result.total_records_processed += load_result.total_records
-                pipeline_result.total_records_transformed += transformation_stats.get('records_transformed', 0)
+                pipeline_result.total_records_transformed += transformation_stats.get('raw_stats', {}).get('records_transformed', 0)
                 
                 if load_result.status == "success":
                     pipeline_result.tables_processed.append(table_name)
@@ -224,8 +227,8 @@ class ETLPipeline(LoggerMixin):
             
             self.logger.info(
                 f"Completed ETL for {table_name}: "
-                f"{transformation_stats.get('records_processed', 0)} extracted → "
-                f"{transformation_stats.get('records_transformed', 0)} transformed → "
+                f"{transformation_stats.get('raw_stats', {}).get('records_processed', 0)} extracted → "
+                f"{transformation_stats.get('raw_stats', {}).get('records_transformed', 0)} transformed → "
                 f"{load_result.total_records} loaded ({load_result.status})"
             )
             
@@ -257,7 +260,7 @@ class ETLPipeline(LoggerMixin):
         finally:
             # Reset transformer stats for next table
             if self.transformer:
-                self.transformer.transformer.reset_stats()
+                self.transformer.reset_all_stats()
     
     async def run_incremental_pipeline(
         self, 
@@ -294,7 +297,8 @@ class ETLPipeline(LoggerMixin):
                 "force": force,
                 "max_concurrent": max_concurrent,
                 "total_tables": len(table_names),
-                "etl_stages": ["extract", "transform", "load"]
+                "etl_stages": ["extract", "transform", "load"],
+                "transformer_info": self.transformer.get_transformation_stats() if self.transformer else {}
             }
             
             self.logger.info(
@@ -370,6 +374,33 @@ class ETLPipeline(LoggerMixin):
             max_concurrent=2  # Conservative for dashboard tables
         )
     
+    async def run_business_logic_processing(self, archivo: str) -> Dict[str, Any]:
+        """
+        Run business logic processing for a specific campaign
+        
+        Args:
+            archivo: Campaign identifier
+            
+        Returns:
+            Business logic processing result
+        """
+        await self._ensure_components()
+        
+        self.logger.info(f"🎯 Starting business logic processing for campaign: {archivo}")
+        
+        try:
+            # Use the unified transformer's business logic capabilities
+            result = await self.transformer.process_campaign_business_logic(archivo)
+            
+            self.logger.info(f"✅ Business logic completed for {archivo}")
+            
+            return result
+            
+        except Exception as e:
+            error_msg = f"❌ Business logic failed for {archivo}: {str(e)}"
+            self.logger.error(error_msg)
+            raise
+    
     async def run_full_refresh(
         self, 
         table_names: Optional[List[str]] = None
@@ -427,6 +458,7 @@ class ETLPipeline(LoggerMixin):
                     "raw_sample": raw_data[:2],  # First 2 raw records
                     "transformed_sample": transformed_data[:2],  # First 2 transformed records
                     "transformation_stats": transformation_stats,
+                    "transformer_info": self.transformer.get_table_info(table_name),
                     "schema_mapping": {
                         "raw_fields": list(raw_data[0].keys()) if raw_data else [],
                         "transformed_fields": list(transformed_data[0].keys()) if transformed_data else []
@@ -449,7 +481,7 @@ class ETLPipeline(LoggerMixin):
         finally:
             # Reset transformer stats
             if self.transformer:
-                self.transformer.transformer.reset_stats()
+                self.transformer.reset_all_stats()
     
     async def get_pipeline_status(self, pipeline_id: str) -> Optional[Dict[str, Any]]:
         """Get status of a running pipeline"""
@@ -473,6 +505,7 @@ class ETLPipeline(LoggerMixin):
         for table_name in ETLConfig.list_tables():
             try:
                 info = await self.extractor.get_table_info(table_name)
+                info['transformer_info'] = self.transformer.get_table_info(table_name)
                 table_info[table_name] = info
             except Exception as e:
                 table_info[table_name] = {"error": str(e)}
@@ -483,7 +516,8 @@ class ETLPipeline(LoggerMixin):
             "active_pipelines": len(self.active_pipelines),
             "configured_tables": len(ETLConfig.list_tables()),
             "dashboard_tables": ETLConfig.get_dashboard_tables(),
-            "transformation_support": self.transformer.get_supported_tables() if self.transformer else []
+            "transformation_support": self.transformer.get_supported_tables() if self.transformer else [],
+            "business_logic_status": self.transformer.get_business_logic_status() if self.transformer else {}
         }
     
     async def cleanup_and_recover(self) -> Dict[str, Any]:
@@ -571,6 +605,12 @@ async def trigger_table_refresh(
         "table_name": table_name,
         "result": load_result.__dict__
     }
+
+
+async def trigger_business_logic_processing(archivo: str) -> Dict[str, Any]:
+    """Trigger business logic processing for a campaign"""
+    pipeline = get_pipeline()
+    return await pipeline.run_business_logic_processing(archivo)
 
 
 async def test_table_transformation(table_name: str) -> Dict[str, Any]:
