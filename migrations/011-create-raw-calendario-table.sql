@@ -1,12 +1,12 @@
 -- ========================================
 -- 011: Create raw_calendario table for BigQuery extraction staging
--- TimescaleDB optimized version
+-- TimescaleDB optimized version - PRIMARY KEY FIXED
 -- ========================================
 
 -- Raw staging table to store calendario data from BigQuery before transformation
 CREATE TABLE IF NOT EXISTS raw_calendario (
     -- Primary identification
-    ARCHIVO TEXT PRIMARY KEY,
+    ARCHIVO TEXT NOT NULL,
     
     -- Campaign metadata
     TIPO_CARTERA TEXT,
@@ -36,7 +36,10 @@ CREATE TABLE IF NOT EXISTS raw_calendario (
     -- ETL metadata
     extraction_timestamp TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    
+    -- ✅ FIXED: Primary key includes partitioning column
+    PRIMARY KEY (ARCHIVO, periodo_date)
 );
 
 -- ========================================
@@ -86,4 +89,4 @@ CREATE TRIGGER trigger_raw_calendario_updated_at
 -- ========================================
 COMMENT ON TABLE raw_calendario IS 'Raw staging table for BigQuery calendario data with TimescaleDB optimization';
 COMMENT ON COLUMN raw_calendario.periodo_date IS 'Time dimension for hypertable partitioning';
-COMMENT ON COLUMN raw_calendario.ARCHIVO IS 'Primary key - campaign file identifier';
+COMMENT ON COLUMN raw_calendario.ARCHIVO IS 'Campaign file identifier - part of composite primary key';
