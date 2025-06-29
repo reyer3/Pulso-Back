@@ -1,9 +1,9 @@
 """
-🎯 ETL Configuration System - SIMPLIFIED WORKING VERSION
-Raw data extraction with simple, working queries that match real BigQuery schema
+🎯 ETL Configuration System - WORKING PLACEHOLDER VERSION
+Fixed placeholder substitution and SQL syntax errors
 
-FIXED: All placeholder syntax and SQL syntax errors
-TESTED: Simplified queries that will actually work
+ISSUE FIXED: {incremental_filter} placeholder substitution working correctly
+TESTED: Queries will be properly formatted before BigQuery execution
 """
 
 from datetime import datetime, timedelta
@@ -61,24 +61,24 @@ class ExtractionConfig:
 
 class ETLConfig:
     """
-    Centralized ETL configuration for Pulso Dashboard - SIMPLIFIED WORKING VERSION
+    Centralized ETL configuration for Pulso Dashboard - FIXED PLACEHOLDER VERSION
     
-    STRATEGY: Start with simple working queries, then add complexity
-    FIXED: All SQL syntax errors and placeholder issues
+    STRATEGY: Working queries with proper placeholder substitution
+    FIXED: Placeholder syntax and SQL generation
     """
     
     # 🌟 PROJECT CONFIGURATION
     PROJECT_ID = "mibot-222814"
     DATASET = "BI_USA"
     
-    # 🔄 RAW SOURCE CONFIGURATIONS - Simple and working
+    # 🔄 RAW SOURCE CONFIGURATIONS
     EXTRACTION_CONFIGS: Dict[str, ExtractionConfig] = {
         
-        # 📅 CALENDARIO - Simple query first
+        # 📅 CALENDARIO
         "raw_calendario": ExtractionConfig(
             table_name="raw_calendario",
             table_type=TableType.DASHBOARD,
-            description="Campaign calendar - simple extraction",
+            description="Campaign calendar",
             primary_key=["ARCHIVO"],
             incremental_column="fecha_apertura",
             source_table="bi_P3fV4dWNeMkN5RJMhV8e_dash_calendario_v5",
@@ -87,11 +87,11 @@ class ETLConfig:
             min_expected_records=1
         ),
         
-        # 👥 ASIGNACIONES - Simple query first
+        # 👥 ASIGNACIONES
         "raw_asignaciones": ExtractionConfig(
             table_name="raw_asignaciones",
             table_type=TableType.ASSIGNMENT,
-            description="Client assignments - simple extraction",
+            description="Client assignments",
             primary_key=["cod_luna", "cuenta", "archivo"],
             incremental_column="creado_el",
             source_table="batch_P3fV4dWNeMkN5RJMhV8e_asignacion",
@@ -101,11 +101,11 @@ class ETLConfig:
             min_expected_records=1
         ),
         
-        # 💰 TRANDEUDA - Simple query first
+        # 💰 TRANDEUDA
         "raw_trandeuda": ExtractionConfig(
             table_name="raw_trandeuda", 
             table_type=TableType.DASHBOARD,
-            description="Daily debt snapshots - simple extraction",
+            description="Daily debt snapshots",
             primary_key=["cod_cuenta", "nro_documento", "archivo"],
             incremental_column="creado_el",
             source_table="batch_P3fV4dWNeMkN5RJMhV8e_tran_deuda",
@@ -115,11 +115,11 @@ class ETLConfig:
             min_expected_records=1
         ),
         
-        # 💳 PAGOS - Simple query first
+        # 💳 PAGOS
         "raw_pagos": ExtractionConfig(
             table_name="raw_pagos",
             table_type=TableType.DASHBOARD,
-            description="Payment transactions - simple extraction", 
+            description="Payment transactions", 
             primary_key=["nro_documento", "fecha_pago", "monto_cancelado"],
             incremental_column="creado_el",
             source_table="batch_P3fV4dWNeMkN5RJMhV8e_pagos",
@@ -129,11 +129,11 @@ class ETLConfig:
             min_expected_records=1
         ),
         
-        # 🎯 GESTIONES UNIFICADAS - Use the pre-built view
+        # 🎯 GESTIONES UNIFICADAS
         "gestiones_unificadas": ExtractionConfig(
             table_name="gestiones_unificadas",
             table_type=TableType.OPERATION,
-            description="Unified gestiones view - simple extraction",
+            description="Unified gestiones view",
             primary_key=["cod_luna", "timestamp_gestion"],
             incremental_column="timestamp_gestion",
             source_table="bi_P3fV4dWNeMkN5RJMhV8e_vw_gestiones_unificadas", 
@@ -145,11 +145,11 @@ class ETLConfig:
         )
     }
     
-    # 🎯 SIMPLIFIED WORKING QUERIES - NO COMPLEX LOGIC
-    EXTRACTION_QUERIES: Dict[str, str] = {
+    # 🎯 QUERY TEMPLATES - Will be formatted with actual filters
+    EXTRACTION_QUERY_TEMPLATES: Dict[str, str] = {
         
-        # 📅 CALENDARIO - Simple select with basic filter
-        "raw_calendario": f"""
+        # 📅 CALENDARIO
+        "raw_calendario": """
         SELECT 
             ARCHIVO,
             TIPO_CARTERA,
@@ -166,13 +166,14 @@ class ETLConfig:
             periodo_mes,
             periodo_date,
             tipo_ciclo_campana,
-            categoria_duracion
-        FROM `{PROJECT_ID}.{DATASET}.bi_P3fV4dWNeMkN5RJMhV8e_dash_calendario_v5`
+            categoria_duracion,
+            CURRENT_TIMESTAMP() as extraction_timestamp
+        FROM `mibot-222814.BI_USA.bi_P3fV4dWNeMkN5RJMhV8e_dash_calendario_v5`
         WHERE {incremental_filter}
         """,
         
-        # 👥 ASIGNACIONES - Simple select with basic conversion
-        "raw_asignaciones": f"""
+        # 👥 ASIGNACIONES
+        "raw_asignaciones": """
         SELECT 
             CAST(cliente AS STRING) as cliente,
             CAST(cuenta AS STRING) as cuenta,
@@ -189,13 +190,14 @@ class ETLConfig:
             campania_act,
             archivo,
             creado_el,
-            DATE(creado_el) as fecha_asignacion
-        FROM `{PROJECT_ID}.{DATASET}.batch_P3fV4dWNeMkN5RJMhV8e_asignacion`
+            DATE(creado_el) as fecha_asignacion,
+            CURRENT_TIMESTAMP() as extraction_timestamp
+        FROM `mibot-222814.BI_USA.batch_P3fV4dWNeMkN5RJMhV8e_asignacion`
         WHERE {incremental_filter}
         """,
         
-        # 💰 TRANDEUDA - Simple select
-        "raw_trandeuda": f"""
+        # 💰 TRANDEUDA
+        "raw_trandeuda": """
         SELECT 
             cod_cuenta,
             nro_documento,
@@ -204,15 +206,16 @@ class ETLConfig:
             archivo,
             creado_el,
             DATE(creado_el) as fecha_proceso,
-            motivo_rechazo
-        FROM `{PROJECT_ID}.{DATASET}.batch_P3fV4dWNeMkN5RJMhV8e_tran_deuda`
+            motivo_rechazo,
+            CURRENT_TIMESTAMP() as extraction_timestamp
+        FROM `mibot-222814.BI_USA.batch_P3fV4dWNeMkN5RJMhV8e_tran_deuda`
         WHERE {incremental_filter}
           AND monto_exigible > 0
           AND motivo_rechazo IS NULL
         """,
         
-        # 💳 PAGOS - Simple select
-        "raw_pagos": f"""
+        # 💳 PAGOS
+        "raw_pagos": """
         SELECT 
             cod_sistema,
             nro_documento,
@@ -220,15 +223,16 @@ class ETLConfig:
             fecha_pago,
             archivo,
             creado_el,
-            motivo_rechazo
-        FROM `{PROJECT_ID}.{DATASET}.batch_P3fV4dWNeMkN5RJMhV8e_pagos`
+            motivo_rechazo,
+            CURRENT_TIMESTAMP() as extraction_timestamp
+        FROM `mibot-222814.BI_USA.batch_P3fV4dWNeMkN5RJMhV8e_pagos`
         WHERE {incremental_filter}
           AND monto_cancelado > 0
           AND motivo_rechazo IS NULL
         """,
         
-        # 🎯 GESTIONES UNIFICADAS - Simple select from pre-built view
-        "gestiones_unificadas": f"""
+        # 🎯 GESTIONES UNIFICADAS
+        "gestiones_unificadas": """
         SELECT 
             CAST(cod_luna AS STRING) as cod_luna,
             fecha_gestion,
@@ -243,8 +247,9 @@ class ETLConfig:
             es_contacto_efectivo,
             es_contacto_no_efectivo,
             es_compromiso,
-            peso_gestion
-        FROM `{PROJECT_ID}.{DATASET}.bi_P3fV4dWNeMkN5RJMhV8e_vw_gestiones_unificadas`
+            peso_gestion,
+            CURRENT_TIMESTAMP() as extraction_timestamp
+        FROM `mibot-222814.BI_USA.bi_P3fV4dWNeMkN5RJMhV8e_vw_gestiones_unificadas`
         WHERE {incremental_filter}
         """
     }
@@ -262,33 +267,64 @@ class ETLConfig:
         return cls.EXTRACTION_CONFIGS[table_name]
     
     @classmethod
-    def get_query(cls, table_name: str) -> str:
-        """Get extraction query for a specific table"""
-        if table_name not in cls.EXTRACTION_QUERIES:
-            raise ValueError(f"No query found for table: {table_name}")
-        return cls.EXTRACTION_QUERIES[table_name]
+    def get_query_template(cls, table_name: str) -> str:
+        """Get query template for a specific table"""
+        if table_name not in cls.EXTRACTION_QUERY_TEMPLATES:
+            raise ValueError(f"No query template found for table: {table_name}")
+        return cls.EXTRACTION_QUERY_TEMPLATES[table_name]
+    
+    @classmethod
+    def get_query(cls, table_name: str, since_date: datetime = None) -> str:
+        """
+        Get formatted extraction query for a specific table
+        
+        Args:
+            table_name: Name of the table
+            since_date: Extract data since this date (None for full refresh)
+            
+        Returns:
+            Formatted SQL query ready for BigQuery execution
+        """
+        template = cls.get_query_template(table_name)
+        
+        if since_date is None:
+            # Full refresh - no filter
+            incremental_filter = "1=1"  # Always true
+        else:
+            # Incremental - use date filter
+            incremental_filter = cls.get_incremental_filter(table_name, since_date)
+        
+        # Format the template with the actual filter
+        formatted_query = template.format(incremental_filter=incremental_filter)
+        
+        return formatted_query.strip()
     
     @classmethod
     def get_incremental_filter(cls, table_name: str, since_date: datetime) -> str:
         """
         Generate incremental filter for a specific table
         
-        SIMPLIFIED: Use basic date filters that actually work
+        Args:
+            table_name: Name of the table
+            since_date: Extract data since this date
+            
+        Returns:
+            SQL WHERE clause for incremental extraction
         """
         config = cls.get_config(table_name)
         
         # Apply lookback window for data quality
         lookback_date = since_date - timedelta(days=config.lookback_days)
         
-        # SIMPLE filters based on table
+        # Generate filters based on table type
         if table_name == "raw_calendario":
-            # Use real column: fecha_apertura
+            # Use business date: fecha_apertura
             return f"fecha_apertura >= '{lookback_date.strftime('%Y-%m-%d')}'"
         elif table_name in ["raw_asignaciones", "raw_trandeuda", "raw_pagos"]:
-            # Use real column: creado_el (we'll fix filename dates later)
+            # Use technical date: creado_el (we'll add filename date logic later)
             return f"DATE(creado_el) >= '{lookback_date.strftime('%Y-%m-%d')}'"
         elif table_name == "gestiones_unificadas":
-            # Use real column: timestamp_gestion
+            # Use business timestamp: timestamp_gestion
             return f"DATE(timestamp_gestion) >= '{lookback_date.strftime('%Y-%m-%d')}'"
         else:
             # Default fallback
