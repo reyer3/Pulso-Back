@@ -50,24 +50,24 @@ class RawDataTransformer(LoggerMixin):
                 
                 transformed = {
                     # Primary key
-                    'ARCHIVO': archivo,
+                    'archivo': archivo,
                     
                     # Campaign metadata - preserve original names
-                    'TIPO_CARTERA': self._safe_string(record.get('TIPO_CARTERA')),
+                    'tipo_cartera': self._safe_string(record.get('TIPO_CARTERA')),
                     
                     # Business dates - critical for campaign logic
                     'fecha_apertura': self._safe_date(record.get('fecha_apertura')),
                     'fecha_trandeuda': self._safe_date(record.get('fecha_trandeuda')),
                     'fecha_cierre': self._safe_date(record.get('fecha_cierre')),
-                    'FECHA_CIERRE_PLANIFICADA': self._safe_date(record.get('FECHA_CIERRE_PLANIFICADA')),
+                    'fecha_cierre_planificada': self._safe_date(record.get('FECHA_CIERRE_PLANIFICADA')),
                     
                     # Campaign characteristics
-                    'DURACION_CAMPANA_DIAS_HABILES': self._safe_int(record.get('DURACION_CAMPANA_DIAS_HABILES')),
-                    'ANNO_ASIGNACION': self._safe_int(record.get('ANNO_ASIGNACION')),
-                    'PERIODO_ASIGNACION': self._safe_string(record.get('PERIODO_ASIGNACION')),
-                    'ES_CARTERA_ABIERTA': self._safe_bool(record.get('ES_CARTERA_ABIERTA')),
-                    'RANGO_VENCIMIENTO': self._safe_string(record.get('RANGO_VENCIMIENTO')),
-                    'ESTADO_CARTERA': self._safe_string(record.get('ESTADO_CARTERA')),
+                    'duracion_campana_dias_habiles': self._safe_int(record.get('DURACION_CAMPANA_DIAS_HABILES')),
+                    'anno_asignacion': self._safe_int(record.get('ANNO_ASIGNACION')),
+                    'periodo_asignacion': self._safe_string(record.get('PERIODO_ASIGNACION')),
+                    'es_cartera_abierta': self._safe_bool(record.get('ES_CARTERA_ABIERTA')),
+                    'rango_vencimiento': self._safe_string(record.get('RANGO_VENCIMIENTO')),
+                    'estado_cartera': self._safe_string(record.get('ESTADO_CARTERA')),
                     
                     # Time partitioning
                     'periodo_mes': self._safe_string(record.get('periodo_mes')),
