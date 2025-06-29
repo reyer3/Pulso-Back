@@ -97,7 +97,7 @@ disallow_untyped_defs = true
 
 [tool.pytest.ini_options]
 minversion = "7.0"
-addopts = "-ra -q --strict-markers --cov=app --cov-report=term-missing"
+addopts = "-ra -q --strict-markers"
 testpaths = ["tests"]
 python_files = "test_*.py"
 python_classes = "Test*"
