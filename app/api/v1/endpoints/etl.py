@@ -72,10 +72,10 @@ class TableStatusResponse(BaseModel):
 
 
 # =============================================================================
-# ROUTER SETUP
+# ROUTER SETUP - FIXED: Remove duplicate prefix
 # =============================================================================
 
-router = APIRouter(prefix="/api/v1/etl", tags=["etl"])
+router = APIRouter(prefix="/etl", tags=["etl"])
 
 
 class ETLAPI(LoggerMixin):
