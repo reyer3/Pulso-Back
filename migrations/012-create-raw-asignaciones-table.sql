@@ -1,6 +1,6 @@
 -- ========================================
 -- 012: Create raw_asignaciones table for BigQuery extraction staging  
--- TimescaleDB optimized version
+-- TimescaleDB optimized version - PRIMARY KEY FIXED
 -- ========================================
 
 -- Raw staging table to store asignaciones data from BigQuery before transformation
@@ -56,8 +56,8 @@ CREATE TABLE IF NOT EXISTS raw_asignaciones (
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
     
-    -- Primary key constraint
-    PRIMARY KEY (cod_luna, cuenta, archivo)
+    -- ✅ FIXED: Primary key includes partitioning column
+    PRIMARY KEY (cod_luna, cuenta, archivo, fecha_asignacion)
 );
 
 -- ========================================
