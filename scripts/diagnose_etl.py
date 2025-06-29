@@ -11,7 +11,7 @@ from typing import Dict, Any
 from app.etl.config import ETLConfig
 from app.etl.transformers.unified_transformer import get_unified_transformer_registry
 from app.etl.watermarks import get_watermark_manager
-from app.core.database import get_database
+from app.database.connection import get_database_manager
 
 
 async def diagnose_etl_system() -> Dict[str, Any]:
@@ -34,6 +34,7 @@ async def diagnose_etl_system() -> Dict[str, Any]:
         
         print(f"   ✅ {len(configured_tables)} tables configured")
         print(f"   ✅ {len(dashboard_tables)} dashboard tables")
+        print(f"   📋 Configured tables: {configured_tables}")
         
         diagnostics["configured_tables"] = configured_tables
         diagnostics["dashboard_tables"] = dashboard_tables
@@ -47,6 +48,7 @@ async def diagnose_etl_system() -> Dict[str, Any]:
             
             print(f"   ✅ Transformer initialized")
             print(f"   ✅ {len(supported_tables)} tables supported by transformers")
+            print(f"   📋 Supported tables: {supported_tables}")
             
             # Check which configured tables don't have transformers
             missing_transformers = set(configured_tables) - set(supported_tables)
@@ -67,8 +69,10 @@ async def diagnose_etl_system() -> Dict[str, Any]:
         # 3. Check database connection
         print("\n3️⃣ Checking Database Connection...")
         try:
-            db = get_database()
-            async with db.get_connection() as conn:
+            db_manager = await get_database_manager()
+            pool = await db_manager.get_pool()
+            
+            async with pool.acquire() as conn:
                 # Test basic query
                 result = await conn.fetchval("SELECT 1")
                 print(f"   ✅ Database connection working")
@@ -112,8 +116,26 @@ async def diagnose_etl_system() -> Dict[str, Any]:
                 except Exception as e:
                     print(f"   ⚠️  TimescaleDB check failed: {str(e)}")
                     diagnostics["issues"].append("TimescaleDB extension may not be installed")
-                    diagnostics["recommendations"].append("Install TimescaleDB extension")
+                    diagnostics["recommendations"].append("Install TimescaleDB extension: CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;")
                     diagnostics["timescaledb_status"] = "failed"
+                
+                # Check watermarks table exists
+                try:
+                    watermarks_check = await conn.fetchval(
+                        "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'etl_watermarks'"
+                    )
+                    if watermarks_check > 0:
+                        print(f"   ✅ Watermarks table exists")
+                    else:
+                        print(f"   ⚠️  Watermarks table missing")
+                        diagnostics["issues"].append("Watermarks table missing")
+                        diagnostics["recommendations"].append("Apply migration 001-create-watermarks-table")
+                    
+                    diagnostics["watermarks_table_exists"] = watermarks_check > 0
+                    
+                except Exception as e:
+                    print(f"   ⚠️  Could not check watermarks table: {str(e)}")
+                    diagnostics["issues"].append(f"Watermarks table check failed: {str(e)}")
                 
         except Exception as e:
             print(f"   ❌ Database connection failed: {str(e)}")
@@ -145,7 +167,34 @@ async def diagnose_etl_system() -> Dict[str, Any]:
             diagnostics["issues"].append(f"Watermark system failed: {str(e)}")
             diagnostics["watermark_status"] = "failed"
         
-        # 5. Summary and recommendations
+        # 5. Check table mapping between config and transformers
+        print("\n5️⃣ Checking Table Mapping...")
+        try:
+            transformer = get_unified_transformer_registry()
+            supported_tables = transformer.get_supported_tables()
+            
+            # Check if all dashboard tables have transformers
+            missing_dashboard_transformers = set(dashboard_tables) - set(supported_tables)
+            if missing_dashboard_transformers:
+                print(f"   ⚠️  Dashboard tables missing transformers: {list(missing_dashboard_transformers)}")
+                diagnostics["issues"].append(f"Dashboard tables missing transformers: {list(missing_dashboard_transformers)}")
+                diagnostics["recommendations"].append("Add transformers for all dashboard tables")
+            else:
+                print(f"   ✅ All dashboard tables have transformers")
+            
+            # Check if all configured tables have transformers  
+            missing_all_transformers = set(configured_tables) - set(supported_tables)
+            if missing_all_transformers:
+                print(f"   ⚠️  Some configured tables missing transformers: {list(missing_all_transformers)}")
+                diagnostics["issues"].append(f"Configured tables missing transformers: {list(missing_all_transformers)}")
+            else:
+                print(f"   ✅ All configured tables have transformers")
+                
+        except Exception as e:
+            print(f"   ❌ Table mapping check failed: {str(e)}")
+            diagnostics["issues"].append(f"Table mapping check failed: {str(e)}")
+        
+        # 6. Summary and recommendations
         print("\n📊 Diagnostic Summary:")
         if diagnostics["issues"]:
             print(f"   ⚠️  {len(diagnostics['issues'])} issues found:")
@@ -157,6 +206,16 @@ async def diagnose_etl_system() -> Dict[str, Any]:
                 print(f"      - {rec}")
         else:
             print(f"   ✅ No major issues detected")
+        
+        # 7. Next steps
+        print(f"\n🚀 Immediate Actions:")
+        if not diagnostics.get("existing_tables"):
+            print(f"   1. Apply migrations: yoyo apply")
+        if diagnostics.get("issues"):
+            print(f"   2. Fix the issues listed above")
+        if not diagnostics.get("issues"):
+            print(f"   1. Try running: curl -X POST http://localhost:8000/api/v1/etl/refresh/raw_calendario")
+            print(f"   2. Check logs for specific extraction errors")
         
         diagnostics["status"] = "completed"
         return diagnostics
