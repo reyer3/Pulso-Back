@@ -8,6 +8,8 @@ Features:
 - Asynchronous streaming and batch processing
 - Data validation and sanitization
 - Detailed load statistics and error reporting
+
+FIXED: Removed automatic fecha_procesamiento column that caused INSERT errors
 """
 
 import time
@@ -58,6 +60,7 @@ class PostgresLoader(LoggerMixin):
     ) -> List[Dict[str, Any]]:
         """
         Validates and sanitizes a batch of data before loading.
+        FIXED: Removed automatic fecha_procesamiento addition that caused errors
         """
         if not data:
             return []
@@ -69,7 +72,7 @@ class PostgresLoader(LoggerMixin):
                 self.logger.warning(f"Record {i} has a null primary key value. Skipping.")
                 continue
 
-            # Sanitize and format data
+            # Sanitize and format data - FIXED: Only sanitize existing data
             sanitized_record = {}
             for key, value in record.items():
                 if isinstance(value, str) and 'T' in value and ('Z'in value or '+' in value):
@@ -79,9 +82,10 @@ class PostgresLoader(LoggerMixin):
                         sanitized_record[key] = value
                 else:
                     sanitized_record[key] = value
-            
-            if 'fecha_procesamiento' not in sanitized_record:
-                sanitized_record['fecha_procesamiento'] = datetime.now(timezone.utc)
+
+            # REMOVED: Automatic fecha_procesamiento addition that caused INSERT errors
+            # if 'fecha_procesamiento' not in sanitized_record:
+            #     sanitized_record['fecha_procesamiento'] = datetime.now(timezone.utc)
 
             validated_data.append(sanitized_record)
 
@@ -97,6 +101,7 @@ class PostgresLoader(LoggerMixin):
     ) -> LoadResult:
         """
         Loads a batch of data into a PostgreSQL table.
+        IMPROVED: Better error handling and simpler INSERT construction
         """
         start_time = time.time()
 
@@ -131,47 +136,51 @@ class PostgresLoader(LoggerMixin):
 
         async with pool.acquire() as conn:
             try:
-                # Build the UPSERT query
-                columns = data[0].keys()
+                # IMPROVED: Simpler INSERT construction for better debugging
+                columns = list(data[0].keys())
                 columns_str = ", ".join(f'"{c}"' for c in columns)
+                placeholders = ", ".join(f"${i+1}" for i in range(len(columns)))
                 pk_str = ", ".join(f'"{pk}"' for pk in primary_key)
                 
                 update_columns = [col for col in columns if col not in primary_key]
                 update_str = ", ".join(f'"{col}" = EXCLUDED."{col}"' for col in update_columns)
 
-                if upsert:
+                if upsert and update_columns:
                     query = f"""
                         INSERT INTO {table_name} ({columns_str})
-                        SELECT * FROM UNNEST($1::{table_name}[])
+                        VALUES ({placeholders})
                         ON CONFLICT ({pk_str}) DO UPDATE SET {update_str}
                     """
                 else:
                     query = f"""
                         INSERT INTO {table_name} ({columns_str})
-                        SELECT * FROM UNNEST($1::{table_name}[])
+                        VALUES ({placeholders})
                     """
-                
-                # Convert list of dicts to list of tuples for asyncpg
-                records_to_insert = [tuple(rec[col] for col in columns) for rec in data]
-                
-                # Execute the query
-                result = await conn.execute(query, records_to_insert)
-                
-                # Parse the result to get inserted/updated counts
-                # Note: this is an approximation, as RETURNING clause would be needed for accuracy
-                num_processed = len(data)
+
+                # IMPROVED: Process records one by one for better error reporting
+                inserted_count = 0
+                for i, record in enumerate(data):
+                    try:
+                        values = [record[col] for col in columns]
+                        await conn.execute(query, *values)
+                        inserted_count += 1
+                    except Exception as record_error:
+                        self.logger.error(f"Failed to insert record {i} into {table_name}: {record_error}")
+                        self.logger.debug(f"Failed record data: {record}")
+                        # Continue with other records instead of failing the entire batch
+                        continue
                 
                 duration = time.time() - start_time
-                self.logger.info(f"Loaded {num_processed} records into {table_name} in {duration:.2f}s.")
+                self.logger.info(f"Loaded {inserted_count}/{len(data)} records into {table_name} in {duration:.2f}s.")
 
                 return LoadResult(
                     table_name=table_name,
                     total_records=len(data),
-                    inserted_records=num_processed,
+                    inserted_records=inserted_count,
                     updated_records=0,  # Simplified for performance
-                    skipped_records=len(data) - num_processed,
+                    skipped_records=len(data) - inserted_count,
                     load_duration_seconds=duration,
-                    status="success"
+                    status="success" if inserted_count > 0 else "failed"
                 )
 
             except Exception as e:
