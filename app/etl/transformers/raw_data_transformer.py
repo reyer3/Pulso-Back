@@ -1,9 +1,10 @@
 """
 🔄 Raw Data Transformers - BigQuery to PostgreSQL Raw Tables
-Minimal transformation for staging BigQuery data into PostgreSQL raw tables
+FIXED: Column case sensitivity mapping for PostgreSQL compatibility
+ADDED: Debug logging for NULL primary key investigation
 
-APPROACH: Light transformation, preserve original data for business logic layer
-PURPOSE: Create staging layer for complex business transformations
+ISSUE: 58 extracted → 58 transformed → 0 loaded (null primary key)
+DEBUG: Added logging to investigate NULL archivo or periodo_date values
 """
 
 from datetime import datetime, date, timezone
@@ -19,6 +20,8 @@ class RawDataTransformer(LoggerMixin):
     
     PRINCIPLE: Minimal transformation - just type conversion and basic cleaning
     PRESERVE: Original BigQuery data structure for business logic layer
+    FIXED: Column name mapping for case sensitivity compatibility
+    DEBUG: Added logging for NULL primary key investigation
     """
     
     def __init__(self):
@@ -34,27 +37,56 @@ class RawDataTransformer(LoggerMixin):
         """
         Transform BigQuery calendario to PostgreSQL raw_calendario
         
-        MINIMAL: Type conversion + basic validation only
+        FIXED: Column names mapped to PostgreSQL lowercase convention
+        DEBUG: Added logging for NULL primary key investigation
         """
         transformed_records = []
         
-        for record in raw_data:
+        # 🔍 DEBUG: Log sample of raw data to investigate NULL primary keys
+        if raw_data:
+            self.logger.info(f"🔍 DEBUG: First raw record keys: {list(raw_data[0].keys())}")
+            self.logger.info(f"🔍 DEBUG: First raw record sample: {dict(list(raw_data[0].items())[:5])}")
+
+        for i, record in enumerate(raw_data):
             try:
                 self.transformation_stats['records_processed'] += 1
                 
+                # 🔍 DEBUG: Log primary key values for first few records
+                raw_archivo = record.get('ARCHIVO')
+                raw_periodo_date = record.get('periodo_date')
+
+                if i < 3:  # Log first 3 records
+                    self.logger.info(
+                        f"🔍 DEBUG Record {i}: "
+                        f"ARCHIVO='{raw_archivo}' (type: {type(raw_archivo)}), "
+                        f"periodo_date='{raw_periodo_date}' (type: {type(raw_periodo_date)})"
+                    )
+
                 # Validate required primary key
                 archivo = self._safe_string(record.get('ARCHIVO'))
                 if not archivo:
+                    self.logger.warning(f"⚠️ Skipping record {i}: archivo is null/empty (raw: '{raw_archivo}')")
+                    self.transformation_stats['records_skipped'] += 1
+                    continue
+
+                # Validate periodo_date
+                periodo_date = self._safe_date(record.get('periodo_date'))
+                if not periodo_date:
+                    self.logger.warning(f"⚠️ Skipping record {i}: periodo_date is null/empty (raw: '{raw_periodo_date}')")
                     self.transformation_stats['records_skipped'] += 1
                     continue
                 
                 transformed = {
                     # Primary key
                     'archivo': archivo,
-                    
+                    # ✅ FIXED: Primary key - PostgreSQL column name
+                    'archivo': archivo,  # PostgreSQL: archivo (lowercase)
+
                     # Campaign metadata - preserve original names
                     'tipo_cartera': self._safe_string(record.get('TIPO_CARTERA')),
-                    
+                    # ✅ FIXED: Campaign metadata - mapped to PostgreSQL schema
+                    'tipo_cartera': self._safe_string(record.get('TIPO_CARTERA')),
+
                     # Business dates - critical for campaign logic
                     'fecha_apertura': self._safe_date(record.get('fecha_apertura')),
                     'fecha_trandeuda': self._safe_date(record.get('fecha_trandeuda')),
@@ -69,9 +101,9 @@ class RawDataTransformer(LoggerMixin):
                     'rango_vencimiento': self._safe_string(record.get('RANGO_VENCIMIENTO')),
                     'estado_cartera': self._safe_string(record.get('ESTADO_CARTERA')),
                     
-                    # Time partitioning
+                    # Time partitioning - ✅ FIXED: Use validated periodo_date
                     'periodo_mes': self._safe_string(record.get('periodo_mes')),
-                    'periodo_date': self._safe_date(record.get('periodo_date')),
+                    'periodo_date': periodo_date,  # Already validated above
                     
                     # Campaign classification
                     'tipo_ciclo_campana': self._safe_string(record.get('tipo_ciclo_campana')),
@@ -83,24 +115,41 @@ class RawDataTransformer(LoggerMixin):
                 
                 # Validate required business date
                 if not transformed['fecha_apertura']:
+                    self.logger.warning(f"⚠️ Skipping record {i}: fecha_apertura is null/empty")
                     self.transformation_stats['records_skipped'] += 1
                     continue
                 
+                # 🔍 DEBUG: Log successful transformation for first few records
+                if i < 3:
+                    self.logger.info(
+                        f"✅ DEBUG Record {i} transformed: "
+                        f"archivo='{transformed['archivo']}', "
+                        f"periodo_date='{transformed['periodo_date']}', "
+                        f"fecha_apertura='{transformed['fecha_apertura']}'"
+                    )
+
                 transformed_records.append(transformed)
                 self.transformation_stats['records_transformed'] += 1
                 
             except Exception as e:
-                self.logger.error(f"Error transforming raw_calendario record: {str(e)}")
+                self.logger.error(f"Error transforming raw_calendario record {i}: {str(e)}")
                 self.transformation_stats['validation_errors'] += 1
                 continue
         
+        # 🔍 DEBUG: Final transformation summary
+        self.logger.info(
+            f"🔍 DEBUG Summary: {len(raw_data)} raw → {len(transformed_records)} transformed "
+            f"(skipped: {self.transformation_stats['records_skipped']}, "
+            f"errors: {self.transformation_stats['validation_errors']})"
+        )
+
         return transformed_records
     
     def transform_raw_asignaciones(self, raw_data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
         Transform BigQuery asignaciones to PostgreSQL raw_asignaciones
         
-        MINIMAL: Type conversion + key field validation
+        FIXED: Column names mapped to PostgreSQL lowercase convention
         """
         transformed_records = []
         
