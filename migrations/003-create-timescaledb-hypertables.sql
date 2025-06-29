@@ -1,11 +1,12 @@
 -- Convert ETL tables to TimescaleDB hypertables for better time-series performance
 -- depends: 002-enable-timescaledb
 
--- Create hypertable for watermarks (time-based partitioning)
+-- ✅ FIXED: Create hypertable for watermarks (time-based partitioning) with data migration
 SELECT create_hypertable(
     'etl_watermarks', 
     'last_extracted_at',
     if_not_exists => TRUE,
+    migrate_data => TRUE,
     chunk_time_interval => INTERVAL '1 day'
 );
 
