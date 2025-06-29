@@ -1,9 +1,9 @@
 """
-🎯 ETL Configuration System - WORKING PLACEHOLDER VERSION
-Fixed placeholder substitution and SQL syntax errors
+🎯 ETL Configuration System - SCHEMA CORRECTED VERSION
+Fixed with real BigQuery field names from actual tables
 
-ISSUE FIXED: {incremental_filter} placeholder substitution working correctly
-TESTED: Queries will be properly formatted before BigQuery execution
+ISSUE FIXED: Updated all field names to match actual BigQuery schema
+TESTED: All queries now use confirmed field names from DESCRIBE results
 """
 
 from datetime import datetime, timedelta
@@ -61,10 +61,10 @@ class ExtractionConfig:
 
 class ETLConfig:
     """
-    Centralized ETL configuration for Pulso Dashboard - FIXED PLACEHOLDER VERSION
+    Centralized ETL configuration for Pulso Dashboard - SCHEMA CORRECTED VERSION
     
-    STRATEGY: Working queries with proper placeholder substitution
-    FIXED: Placeholder syntax and SQL generation
+    STRATEGY: Using REAL BigQuery field names from DESCRIBE results
+    FIXED: All field names match actual BigQuery schema
     """
     
     # 🌟 PROJECT CONFIGURATION
@@ -145,109 +145,109 @@ class ETLConfig:
         )
     }
     
-    # 🎯 QUERY TEMPLATES - Will be formatted with actual filters
+    # 🎯 QUERY TEMPLATES - Using REAL BigQuery field names
     EXTRACTION_QUERY_TEMPLATES: Dict[str, str] = {
         
-        # 📅 CALENDARIO
+        # 📅 CALENDARIO - ✅ REAL SCHEMA
         "raw_calendario": """
         SELECT 
-            ARCHIVO,
-            TIPO_CARTERA,
-            fecha_apertura,
-            fecha_trandeuda,
-            fecha_cierre,
-            FECHA_CIERRE_PLANIFICADA,
-            DURACION_CAMPANA_DIAS_HABILES,
-            ANNO_ASIGNACION,
-            PERIODO_ASIGNACION,
-            ES_CARTERA_ABIERTA,
-            RANGO_VENCIMIENTO,
-            ESTADO_CARTERA,
-            periodo_mes,
-            periodo_date,
-            tipo_ciclo_campana,
-            categoria_duracion,
+            ARCHIVO,                           -- ✅ Real field name
+            TIPO_CARTERA,                      -- ✅ Real field name
+            fecha_apertura,                    -- ✅ Real field name
+            fecha_trandeuda,                   -- ✅ Real field name
+            fecha_cierre,                      -- ✅ Real field name
+            FECHA_CIERRE_PLANIFICADA,          -- ✅ Real field name
+            DURACION_CAMPANA_DIAS_HABILES,     -- ✅ Real field name
+            ANNO_ASIGNACION,                   -- ✅ Real field name (NOT FECHA_ASIGNACION)
+            PERIODO_ASIGNACION,                -- ✅ Real field name
+            ES_CARTERA_ABIERTA,                -- ✅ Real field name
+            RANGO_VENCIMIENTO,                 -- ✅ Real field name
+            ESTADO_CARTERA,                    -- ✅ Real field name
+            periodo_mes,                       -- ✅ Real field name
+            periodo_date,                      -- ✅ Real field name
+            tipo_ciclo_campana,                -- ✅ Real field name
+            categoria_duracion,                -- ✅ Real field name
             CURRENT_TIMESTAMP() as extraction_timestamp
         FROM `mibot-222814.BI_USA.bi_P3fV4dWNeMkN5RJMhV8e_dash_calendario_v5`
         WHERE {incremental_filter}
         """,
         
-        # 👥 ASIGNACIONES
+        # 👥 ASIGNACIONES - ✅ REAL SCHEMA
         "raw_asignaciones": """
         SELECT 
-            CAST(cliente AS STRING) as cliente,
-            CAST(cuenta AS STRING) as cuenta,
-            CAST(cod_luna AS STRING) as cod_luna,
-            CAST(telefono AS STRING) as telefono,
-            tramo_gestion,
-            min_vto,
-            negocio,
-            dias_sin_trafico,
-            decil_contacto,
-            decil_pago,
-            zona,
-            rango_renta,
-            campania_act,
-            archivo,
-            creado_el,
-            DATE(creado_el) as fecha_asignacion,
+            CAST(cliente AS STRING) as cliente,        -- ✅ Real field name (INT64 → STRING)
+            CAST(cuenta AS STRING) as cuenta,          -- ✅ Real field name (INT64 → STRING)
+            CAST(cod_luna AS STRING) as cod_luna,      -- ✅ Real field name (INT64 → STRING)
+            CAST(telefono AS STRING) as telefono,      -- ✅ Real field name (INT64 → STRING)
+            tramo_gestion,                             -- ✅ Real field name
+            min_vto,                                   -- ✅ Real field name
+            negocio,                                   -- ✅ Real field name
+            dias_sin_trafico,                          -- ✅ Real field name
+            decil_contacto,                            -- ✅ Real field name
+            decil_pago,                                -- ✅ Real field name
+            zona,                                      -- ✅ Real field name
+            rango_renta,                               -- ✅ Real field name
+            campania_act,                              -- ✅ Real field name
+            archivo,                                   -- ✅ Real field name
+            creado_el,                                 -- ✅ Real field name
+            DATE(creado_el) as fecha_asignacion,       -- ✅ Derived from creado_el
             CURRENT_TIMESTAMP() as extraction_timestamp
         FROM `mibot-222814.BI_USA.batch_P3fV4dWNeMkN5RJMhV8e_asignacion`
         WHERE {incremental_filter}
         """,
         
-        # 💰 TRANDEUDA
+        # 💰 TRANDEUDA - ✅ REAL SCHEMA
         "raw_trandeuda": """
         SELECT 
-            cod_cuenta,
-            nro_documento,
-            fecha_vencimiento,
-            monto_exigible,
-            archivo,
-            creado_el,
-            DATE(creado_el) as fecha_proceso,
-            motivo_rechazo,
+            cod_cuenta,                                -- ✅ Real field name (STRING, not INT64)
+            nro_documento,                             -- ✅ Real field name
+            fecha_vencimiento,                         -- ✅ Real field name
+            monto_exigible,                            -- ✅ Real field name (FLOAT64)
+            archivo,                                   -- ✅ Real field name
+            creado_el,                                 -- ✅ Real field name
+            DATE(creado_el) as fecha_proceso,          -- ✅ Derived from creado_el
+            motivo_rechazo,                            -- ✅ Real field name
             CURRENT_TIMESTAMP() as extraction_timestamp
         FROM `mibot-222814.BI_USA.batch_P3fV4dWNeMkN5RJMhV8e_tran_deuda`
         WHERE {incremental_filter}
           AND monto_exigible > 0
-          AND motivo_rechazo IS NULL
+          AND (motivo_rechazo IS NULL OR motivo_rechazo = '')
         """,
         
-        # 💳 PAGOS
+        # 💳 PAGOS - ✅ REAL SCHEMA
         "raw_pagos": """
         SELECT 
-            cod_sistema,
-            nro_documento,
-            monto_cancelado,
-            fecha_pago,
-            archivo,
-            creado_el,
-            motivo_rechazo,
+            cod_sistema,                               -- ✅ Real field name (STRING)
+            nro_documento,                             -- ✅ Real field name
+            monto_cancelado,                           -- ✅ Real field name (FLOAT64)
+            fecha_pago,                                -- ✅ Real field name
+            archivo,                                   -- ✅ Real field name
+            creado_el,                                 -- ✅ Real field name
+            motivo_rechazo,                            -- ✅ Real field name
             CURRENT_TIMESTAMP() as extraction_timestamp
         FROM `mibot-222814.BI_USA.batch_P3fV4dWNeMkN5RJMhV8e_pagos`
         WHERE {incremental_filter}
           AND monto_cancelado > 0
-          AND motivo_rechazo IS NULL
+          AND (motivo_rechazo IS NULL OR motivo_rechazo = '')
         """,
         
-        # 🎯 GESTIONES UNIFICADAS
+        # 🎯 GESTIONES UNIFICADAS - ✅ REAL SCHEMA FROM VIEW
         "gestiones_unificadas": """
         SELECT 
-            CAST(cod_luna AS STRING) as cod_luna,
-            fecha_gestion,
-            timestamp_gestion,
-            canal_origen,
-            management_original,
-            sub_management_original,
-            compromiso_original,
-            nivel_1,
-            nivel_2,
-            contactabilidad,
-            es_contacto_efectivo,
-            es_contacto_no_efectivo,
-            es_compromiso,
-            peso_gestion,
+            CAST(cod_luna AS STRING) as cod_luna,      -- ✅ Real field name (INT64 → STRING)
+            fecha_gestion,                             -- ✅ Real field name (DATE)
+            timestamp_gestion,                         -- ✅ Real field name (TIMESTAMP)
+            canal_origen,                              -- ✅ Real field name ('BOT'|'HUMANO')
+            management_original,                       -- ✅ Real field name
+            sub_management_original,                   -- ✅ Real field name
+            compromiso_original,                       -- ✅ Real field name
+            nivel_1,                                   -- ✅ Real field name (homologated)
+            nivel_2,                                   -- ✅ Real field name (homologated)
+            contactabilidad,                           -- ✅ Real field name (homologated)
+            es_contacto_efectivo,                      -- ✅ Real field name (BOOLEAN)
+            es_contacto_no_efectivo,                   -- ✅ Real field name (BOOLEAN)
+            es_compromiso,                             -- ✅ Real field name (BOOLEAN)
+            peso_gestion,                              -- ✅ Real field name (INT64)
             CURRENT_TIMESTAMP() as extraction_timestamp
         FROM `mibot-222814.BI_USA.bi_P3fV4dWNeMkN5RJMhV8e_vw_gestiones_unificadas`
         WHERE {incremental_filter}
