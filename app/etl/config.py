@@ -1,8 +1,8 @@
 """
-🎯 ETL Configuration System - SIMPLE RAW EXTRACTION VERSION
-Minimal BigQuery extraction + All transformation logic in Python pipeline
+🎯 ETL Configuration System - CORRECTED SCHEMA VERSION
+Raw data extraction with real BigQuery column names and simplified approach
 
-APPROACH: Extract raw data with simple filters, transform everything in Python
+SCHEMA VERIFIED: All column names and types confirmed from actual BigQuery tables
 """
 
 from datetime import datetime, timedelta
@@ -47,7 +47,7 @@ class ExtractionConfig:
     
     # BigQuery specific
     source_dataset: str = "BI_USA"
-    source_view: Optional[str] = None
+    source_table: str = None
     
     # Quality checks
     required_columns: List[str] = None
@@ -60,292 +60,318 @@ class ExtractionConfig:
 
 class ETLConfig:
     """
-    Centralized ETL configuration for Pulso Dashboard - SIMPLE EXTRACTION VERSION
+    Centralized ETL configuration for Pulso Dashboard - SCHEMA CORRECTED VERSION
     
-    STRATEGY: Extract raw data with minimal logic, transform everything in Python
+    STRATEGY: Extract raw sources separately, transform in Python pipeline
+    VERIFIED: All column names match real BigQuery schemas
     """
     
     # 🌟 PROJECT CONFIGURATION
     PROJECT_ID = "mibot-222814"
     DATASET = "BI_USA"
     
-    # 🔄 EXTRACTION CONFIGURATIONS
+    # 🔄 RAW SOURCE CONFIGURATIONS - One per BigQuery table
     EXTRACTION_CONFIGS: Dict[str, ExtractionConfig] = {
         
-        # 📊 MAIN DASHBOARD DATA - Extract from multiple raw sources
-        "dashboard_data": ExtractionConfig(
-            table_name="dashboard_data",
+        # 📅 CALENDARIO - Campaign definitions
+        "raw_calendario": ExtractionConfig(
+            table_name="raw_calendario",
             table_type=TableType.DASHBOARD,
-            description="Dashboard data - raw sources combined in Python",
-            primary_key=["fecha_foto", "archivo", "cartera", "servicio"],
-            incremental_column="fecha_apertura",  # From calendario
+            description="Campaign calendar - corrected schema",
+            primary_key=["ARCHIVO"],
+            incremental_column="fecha_apertura",
+            source_table="bi_P3fV4dWNeMkN5RJMhV8e_dash_calendario_v5",
             lookback_days=7,
             required_columns=["ARCHIVO", "fecha_apertura"],
             min_expected_records=1
         ),
         
-        # 📈 EVOLUTION TIME SERIES  
-        "evolution_data": ExtractionConfig(
-            table_name="evolution_data", 
-            table_type=TableType.EVOLUTION,
-            description="Evolution data from calendario base",
-            primary_key=["fecha_foto", "archivo"],
-            incremental_column="fecha_apertura",
-            lookback_days=3,
-            batch_size=50000,
-            required_columns=["ARCHIVO", "fecha_apertura"],
-            min_expected_records=1
-        ),
-        
-        # 📋 ASSIGNMENT ANALYSIS
-        "assignment_data": ExtractionConfig(
-            table_name="assignment_data",
+        # 👥 ASIGNACIONES - Client assignments
+        "raw_asignaciones": ExtractionConfig(
+            table_name="raw_asignaciones",
             table_type=TableType.ASSIGNMENT,
-            description="Assignment analysis from raw batch data",
-            primary_key=["periodo", "archivo", "cartera"],
-            incremental_column="creado_el",  # From asignaciones
+            description="Client assignments - corrected schema",
+            primary_key=["cod_luna", "cuenta", "archivo"],
+            incremental_column="creado_el",
+            source_table="batch_P3fV4dWNeMkN5RJMhV8e_asignacion",
             lookback_days=30,
-            refresh_frequency_hours=24,
-            required_columns=["archivo", "creado_el"],
+            batch_size=50000,
+            required_columns=["cod_luna", "cuenta", "archivo"],
             min_expected_records=1
         ),
         
-        # ⚡ OPERATION HOURLY DATA
-        "operation_data": ExtractionConfig(
-            table_name="operation_data",
+        # 💰 TRANDEUDA - Daily debt snapshots
+        "raw_trandeuda": ExtractionConfig(
+            table_name="raw_trandeuda", 
+            table_type=TableType.DASHBOARD,
+            description="Daily debt snapshots - corrected schema",
+            primary_key=["cod_cuenta", "nro_documento", "archivo"],
+            incremental_column="creado_el",
+            source_table="batch_P3fV4dWNeMkN5RJMhV8e_tran_deuda",
+            lookback_days=14,
+            batch_size=100000,
+            required_columns=["cod_cuenta", "monto_exigible"],
+            min_expected_records=1
+        ),
+        
+        # 💳 PAGOS - Payment transactions
+        "raw_pagos": ExtractionConfig(
+            table_name="raw_pagos",
+            table_type=TableType.DASHBOARD,
+            description="Payment transactions - corrected schema", 
+            primary_key=["nro_documento", "fecha_pago", "monto_cancelado"],
+            incremental_column="creado_el",
+            source_table="batch_P3fV4dWNeMkN5RJMhV8e_pagos",
+            lookback_days=30,
+            batch_size=25000,
+            required_columns=["nro_documento", "fecha_pago", "monto_cancelado"],
+            min_expected_records=1
+        ),
+        
+        # 🤖 GESTIONES BOT - Bot management actions
+        "raw_gestiones_bot": ExtractionConfig(
+            table_name="raw_gestiones_bot",
             table_type=TableType.OPERATION,
-            description="Hourly operational metrics from gestiones",
-            primary_key=["fecha_foto", "hora", "canal", "campaign_name"],
-            incremental_column="date",  # From gestiones tables
-            lookback_days=2,
-            batch_size=5000,
+            description="Bot gestiones - corrected schema",
+            primary_key=["document", "date", "uid"],
+            incremental_column="date",
+            source_table="voicebot_P3fV4dWNeMkN5RJMhV8e",
+            lookback_days=5,
+            batch_size=50000,
             refresh_frequency_hours=2,
-            max_execution_time_minutes=15,
-            required_columns=["date", "campaign_name"],
+            required_columns=["document", "date", "management"],
             min_expected_records=1
         ),
         
-        # 👥 PRODUCTIVITY DATA
-        "productivity_data": ExtractionConfig(
-            table_name="productivity_data",
-            table_type=TableType.PRODUCTIVITY, 
-            description="Agent productivity from gestiones",
-            primary_key=["fecha_foto", "correo_agente", "hora"],
-            incremental_column="date",  # From gestiones tables
+        # 👨‍💼 GESTIONES HUMANO - Human agent actions  
+        "raw_gestiones_humano": ExtractionConfig(
+            table_name="raw_gestiones_humano",
+            table_type=TableType.PRODUCTIVITY,
+            description="Human agent gestiones - corrected schema",
+            primary_key=["document", "date", "uid"],
+            incremental_column="date",
+            source_table="mibotair_P3fV4dWNeMkN5RJMhV8e",
             lookback_days=5,
-            refresh_frequency_hours=8,
-            required_columns=["date", "correo_agente"],
+            batch_size=25000,
+            refresh_frequency_hours=2,
+            required_columns=["document", "date", "correo_agente"],
+            min_expected_records=1
+        ),
+        
+        # 📞 CONTACTOS - Contact effectiveness data
+        "raw_contactos": ExtractionConfig(
+            table_name="raw_contactos",
+            table_type=TableType.OPERATION,
+            description="Contact effectiveness master data",
+            primary_key=["cod_luna", "archivo"],
+            incremental_column="creado_el", 
+            source_table="batch_P3fV4dWNeMkN5RJMhV8e_master_contacto",
+            lookback_days=30,
+            required_columns=["cod_luna", "valor_contacto"],
+            min_expected_records=1
+        ),
+        
+        # 🎯 GESTIONES UNIFICADAS - Pre-built view with homologation
+        "gestiones_unificadas": ExtractionConfig(
+            table_name="gestiones_unificadas",
+            table_type=TableType.OPERATION,
+            description="Unified gestiones view - bot + human with homologation",
+            primary_key=["cod_luna", "timestamp_gestion"],
+            incremental_column="timestamp_gestion",
+            source_table="bi_P3fV4dWNeMkN5RJMhV8e_vw_gestiones_unificadas", 
+            lookback_days=3,
+            batch_size=75000,
+            refresh_frequency_hours=1,
+            required_columns=["cod_luna", "fecha_gestion", "contactabilidad"],
             min_expected_records=1
         )
+    }
+    
+    # 🎯 SIMPLIFIED RAW EXTRACTION QUERIES - CORRECTED SCHEMA
+    EXTRACTION_QUERIES: Dict[str, str] = {
+        
+        # 📅 CALENDARIO - Campaign calendar with CORRECT column names
+        "raw_calendario": f"""
+        SELECT 
+            ARCHIVO,                          -- ✅ Real column name
+            TIPO_CARTERA,                     -- ✅ Real column name
+            fecha_apertura,                   -- ✅ Real column name
+            fecha_trandeuda,                  -- ✅ Real column name  
+            fecha_cierre,                     -- ✅ Real column name
+            FECHA_CIERRE_PLANIFICADA,         -- ✅ Real column name
+            DURACION_CAMPANA_DIAS_HABILES,    -- ✅ Real column name
+            ANNO_ASIGNACION,                  -- ✅ CORRECTED: Not FECHA_ASIGNACION
+            PERIODO_ASIGNACION,               -- ✅ Real column name
+            ES_CARTERA_ABIERTA,               -- ✅ Real column name
+            RANGO_VENCIMIENTO,                -- ✅ Real column name
+            ESTADO_CARTERA,                   -- ✅ Real column name
+            periodo_mes,                      -- ✅ Real column name
+            periodo_date,                     -- ✅ Real column name
+            tipo_ciclo_campana,               -- ✅ Real column name
+            categoria_duracion,               -- ✅ Real column name
+            CURRENT_TIMESTAMP() as extraction_timestamp
+        FROM `{PROJECT_ID}.{DATASET}.bi_P3fV4dWNeMkN5RJMhV8e_dash_calendario_v5`
+        WHERE {{incremental_filter}}
+        """,
+        
+        # 👥 ASIGNACIONES - Client assignments with CORRECT column names and types
+        "raw_asignaciones": f"""
+        SELECT 
+            CAST(cliente AS STRING) as cliente,        -- ✅ Convert INT64 to STRING
+            CAST(cuenta AS STRING) as cuenta,          -- ✅ Convert INT64 to STRING  
+            CAST(cod_luna AS STRING) as cod_luna,      -- ✅ Convert INT64 to STRING
+            CAST(telefono AS STRING) as telefono,      -- ✅ Convert INT64 to STRING
+            tramo_gestion,                             -- ✅ Real column name
+            min_vto,                                   -- ✅ Real column name
+            negocio,                                   -- ✅ Real column name
+            dias_sin_trafico,                          -- ✅ Real column name
+            decil_contacto,                            -- ✅ Real column name
+            decil_pago,                                -- ✅ Real column name
+            zona,                                      -- ✅ Real column name
+            rango_renta,                               -- ✅ Real column name
+            campania_act,                              -- ✅ Real column name
+            archivo,                                   -- ✅ Real column name
+            creado_el,                                 -- ✅ Real column name
+            DATE(creado_el) as fecha_asignacion,       -- ✅ Derived date field
+            CURRENT_TIMESTAMP() as extraction_timestamp
+        FROM `{PROJECT_ID}.{DATASET}.batch_P3fV4dWNeMkN5RJMhV8e_asignacion`
+        WHERE {{incremental_filter}}
+        """,
+        
+        # 💰 TRANDEUDA - Debt snapshots with CORRECT column names and types
+        "raw_trandeuda": f"""
+        SELECT 
+            cod_cuenta,                                -- ✅ Real column name (STRING)
+            nro_documento,                             -- ✅ Real column name
+            fecha_vencimiento,                         -- ✅ Real column name
+            monto_exigible,                            -- ✅ Real column name (FLOAT64)
+            archivo,                                   -- ✅ Real column name
+            creado_el,                                 -- ✅ Real column name
+            DATE(creado_el) as fecha_proceso,          -- ✅ Derived date field
+            motivo_rechazo,                            -- ✅ Real column name
+            CURRENT_TIMESTAMP() as extraction_timestamp
+        FROM `{PROJECT_ID}.{DATASET}.batch_P3fV4dWNeMkN5RJMhV8e_tran_deuda`
+        WHERE {{incremental_filter}}
+          AND monto_exigible > 0                      -- ✅ Only active debt
+          AND motivo_rechazo IS NULL                  -- ✅ Only valid records
+        """,
+        
+        # 💳 PAGOS - Payment transactions with CORRECT column names
+        "raw_pagos": f"""
+        SELECT 
+            cod_sistema,                               -- ✅ Real column name
+            nro_documento,                             -- ✅ Real column name
+            monto_cancelado,                           -- ✅ Real column name (FLOAT64)
+            fecha_pago,                                -- ✅ Real column name
+            archivo,                                   -- ✅ Real column name
+            creado_el,                                 -- ✅ Real column name
+            motivo_rechazo,                            -- ✅ Real column name
+            CURRENT_TIMESTAMP() as extraction_timestamp
+        FROM `{PROJECT_ID}.{DATASET}.batch_P3fV4dWNeMkN5RJMhV8e_pagos`
+        WHERE {{incremental_filter}}
+          AND monto_cancelado > 0                     -- ✅ Only positive payments
+          AND motivo_rechazo IS NULL                  -- ✅ Only valid records
+        """,
+        
+        # 🤖 GESTIONES BOT - Bot management with CORRECT table and columns
+        "raw_gestiones_bot": f"""
+        SELECT 
+            document,                                  -- ✅ Real column name (STRING)
+            date,                                      -- ✅ Real column name (DATETIME)
+            campaign_id,                               -- ✅ Real column name
+            campaign_name,                             -- ✅ Real column name
+            CAST(phone AS STRING) as phone,            -- ✅ Convert FLOAT64 to STRING
+            management,                                -- ✅ Real column name
+            sub_management,                            -- ✅ Real column name
+            weight,                                    -- ✅ Real column name (INT64)
+            origin,                                    -- ✅ Real column name
+            fecha_compromiso,                          -- ✅ Real column name
+            interes,                                   -- ✅ Real column name
+            compromiso,                                -- ✅ Real column name
+            observacion,                               -- ✅ Real column name
+            project,                                   -- ✅ Real column name
+            client,                                    -- ✅ Real column name
+            uid,                                       -- ✅ Real column name
+            duracion,                                  -- ✅ Real column name
+            DATE(date) as fecha_gestion,               -- ✅ Derived date field
+            CURRENT_TIMESTAMP() as extraction_timestamp
+        FROM `{PROJECT_ID}.{DATASET}.voicebot_P3fV4dWNeMkN5RJMhV8e`
+        WHERE {{incremental_filter}}
+        """,
+        
+        # 👨‍💼 GESTIONES HUMANO - Human agent management with CORRECT table and columns
+        "raw_gestiones_humano": f"""
+        SELECT 
+            document,                                  -- ✅ Real column name (STRING)
+            date,                                      -- ✅ Real column name (DATETIME)
+            campaign_id,                               -- ✅ Real column name
+            campaign_name,                             -- ✅ Real column name
+            CAST(phone AS STRING) as phone,            -- ✅ Convert FLOAT64 to STRING
+            management,                                -- ✅ Real column name
+            sub_management,                            -- ✅ Real column name
+            weight,                                    -- ✅ Real column name (INT64)
+            origin,                                    -- ✅ Real column name
+            n1,                                        -- ✅ Real column name
+            n2,                                        -- ✅ Real column name
+            n3,                                        -- ✅ Real column name
+            observacion,                               -- ✅ Real column name
+            extra,                                     -- ✅ Real column name
+            project,                                   -- ✅ Real column name
+            client,                                    -- ✅ Real column name
+            uid,                                       -- ✅ Real column name
+            nombre_agente,                             -- ✅ Real column name
+            correo_agente,                             -- ✅ Real column name
+            duracion,                                  -- ✅ Real column name
+            monto_compromiso,                          -- ✅ Real column name (FLOAT64)
+            fecha_compromiso,                          -- ✅ Real column name (DATE)
+            DATE(date) as fecha_gestion,               -- ✅ Derived date field
+            CURRENT_TIMESTAMP() as extraction_timestamp
+        FROM `{PROJECT_ID}.{DATASET}.mibotair_P3fV4dWNeMkN5RJMhV8e`
+        WHERE {{incremental_filter}}
+          AND correo_agente IS NOT NULL              -- ✅ Only identified agents
+        """,
+        
+        # 📞 CONTACTOS - Contact effectiveness data
+        "raw_contactos": f"""
+        SELECT 
+            cod_luna,                                  -- ✅ Real column name
+            valor_contacto,                            -- ✅ Real column name
+            archivo,                                   -- ✅ Real column name
+            creado_el,                                 -- ✅ Real column name
+            motivo_rechazo,                            -- ✅ Real column name
+            CURRENT_TIMESTAMP() as extraction_timestamp
+        FROM `{PROJECT_ID}.{DATASET}.batch_P3fV4dWNeMkN5RJMhV8e_master_contacto`
+        WHERE {{incremental_filter}}
+          AND motivo_rechazo IS NULL                  -- ✅ Only valid records
+        """,
+        
+        # 🎯 GESTIONES UNIFICADAS - Pre-built view with homologation (BEST FOR KPIs)
+        "gestiones_unificadas": f"""
+        SELECT 
+            CAST(cod_luna AS STRING) as cod_luna,      -- ✅ Ensure STRING type
+            fecha_gestion,                             -- ✅ Real column name (DATE)
+            timestamp_gestion,                         -- ✅ Real column name (TIMESTAMP)
+            canal_origen,                              -- ✅ Real column name ('BOT'|'HUMANO')
+            management_original,                       -- ✅ Real column name
+            sub_management_original,                   -- ✅ Real column name
+            compromiso_original,                       -- ✅ Real column name
+            nivel_1,                                   -- ✅ Real column name (homologated)
+            nivel_2,                                   -- ✅ Real column name (homologated)
+            contactabilidad,                           -- ✅ Real column name (homologated)
+            es_contacto_efectivo,                      -- ✅ Real column name (BOOL) - FOR PCT_CONTAC
+            es_contacto_no_efectivo,                   -- ✅ Real column name (BOOL)
+            es_compromiso,                             -- ✅ Real column name (BOOL) - FOR PCT_EFECTIVIDAD
+            peso_gestion,                              -- ✅ Real column name (INT64)
+            CURRENT_TIMESTAMP() as extraction_timestamp
+        FROM `{PROJECT_ID}.{DATASET}.bi_P3fV4dWNeMkN5RJMhV8e_vw_gestiones_unificadas`
+        WHERE {{incremental_filter}}
+        """
     }
     
     # 🚨 GLOBAL SETTINGS
     DEFAULT_TIMEZONE = "America/Lima"
     MAX_RETRY_ATTEMPTS = 3
     RETRY_DELAY_SECONDS = 30
-    
-    # 🎯 SIMPLE EXTRACTION QUERIES - RAW DATA ONLY
-    EXTRACTION_QUERIES: Dict[str, str] = {
-        
-        # DASHBOARD DATA: Multiple raw sources to be joined in Python
-        "dashboard_data": f"""
-        -- 📊 DASHBOARD RAW SOURCES - To be combined in Python
-        
-        -- Source 1: Calendario
-        WITH calendario_raw AS (
-            SELECT 
-                ARCHIVO,
-                TIPO_CARTERA,
-                fecha_apertura,
-                fecha_trandeuda,
-                fecha_cierre,
-                FECHA_CIERRE_PLANIFICADA,
-                DURACION_CAMPANA_DIAS_HABILES,
-                ANNO_ASIGNACION,
-                PERIODO_ASIGNACION,
-                ES_CARTERA_ABIERTA,
-                RANGO_VENCIMIENTO,
-                ESTADO_CARTERA,
-                periodo_mes,
-                periodo_date,
-                tipo_ciclo_campana,
-                categoria_duracion,
-                'calendario' as source_table
-            FROM `{PROJECT_ID}.{DATASET}.bi_P3fV4dWNeMkN5RJMhV8e_dash_calendario_v5`
-            WHERE {{incremental_filter}}
-        ),
-        
-        -- Source 2: Asignaciones  
-        asignaciones_raw AS (
-            SELECT 
-                archivo,
-                cod_luna,
-                cuenta,
-                min_vto,
-                negocio,
-                telefono,
-                tramo_gestion,
-                decil_contacto,
-                decil_pago,
-                creado_el,
-                'asignacion' as source_table
-            FROM `{PROJECT_ID}.{DATASET}.batch_P3fV4dWNeMkN5RJMhV8e_asignacion`
-            WHERE DATE(creado_el) >= DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY)
-        ),
-        
-        -- Source 3: Deuda
-        deuda_raw AS (
-            SELECT 
-                cod_cuenta,
-                nro_documento,
-                fecha_vencimiento,
-                monto_exigible,
-                creado_el,
-                'deuda' as source_table
-            FROM `{PROJECT_ID}.{DATASET}.batch_P3fV4dWNeMkN5RJMhV8e_tran_deuda`
-            WHERE DATE(creado_el) >= DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY)
-              AND monto_exigible > 0
-        ),
-        
-        -- Source 4: Gestiones Bot
-        gestiones_bot_raw AS (
-            SELECT 
-                document,
-                date,
-                campaign_name,
-                management,
-                sub_management,
-                compromiso,
-                'gestiones_bot' as source_table
-            FROM `{PROJECT_ID}.{DATASET}.voicebot_P3fV4dWNeMkN5RJMhV8e`
-            WHERE DATE(date) >= DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY)
-        ),
-        
-        -- Source 5: Gestiones Humano
-        gestiones_humano_raw AS (
-            SELECT 
-                document,
-                date,
-                campaign_name,
-                n1,
-                n2,
-                n3,
-                correo_agente,
-                'gestiones_humano' as source_table
-            FROM `{PROJECT_ID}.{DATASET}.mibotair_P3fV4dWNeMkN5RJMhV8e`
-            WHERE DATE(date) >= DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY)
-        ),
-        
-        -- Source 6: Pagos
-        pagos_raw AS (
-            SELECT 
-                nro_documento,
-                fecha_pago,
-                monto_cancelado,
-                creado_el,
-                'pagos' as source_table
-            FROM `{PROJECT_ID}.{DATASET}.batch_P3fV4dWNeMkN5RJMhV8e_pagos`
-            WHERE DATE(creado_el) >= DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY)
-              AND monto_cancelado > 0
-        )
-        
-        -- UNION ALL raw sources with metadata
-        SELECT *, CURRENT_TIMESTAMP() as extraction_timestamp FROM calendario_raw
-        UNION ALL
-        SELECT 
-            archivo as ARCHIVO,
-            NULL as TIPO_CARTERA,
-            NULL as fecha_apertura,
-            NULL as fecha_trandeuda,
-            NULL as fecha_cierre,
-            NULL as FECHA_CIERRE_PLANIFICADA,
-            NULL as DURACION_CAMPANA_DIAS_HABILES,
-            NULL as ANNO_ASIGNACION,
-            NULL as PERIODO_ASIGNACION,
-            NULL as ES_CARTERA_ABIERTA,
-            NULL as RANGO_VENCIMIENTO,
-            NULL as ESTADO_CARTERA,
-            NULL as periodo_mes,
-            NULL as periodo_date,
-            NULL as tipo_ciclo_campana,
-            NULL as categoria_duracion,
-            source_table,
-            CURRENT_TIMESTAMP() as extraction_timestamp
-        FROM asignaciones_raw
-        """,
-        
-        # SIMPLIFIED QUERIES FOR OTHER TABLES
-        "evolution_data": f"""
-        -- 📈 EVOLUTION RAW DATA - Calendario only
-        SELECT 
-            ARCHIVO,
-            fecha_apertura,
-            fecha_cierre,
-            TIPO_CARTERA,
-            periodo_mes,
-            periodo_date,
-            CURRENT_TIMESTAMP() as extraction_timestamp
-        FROM `{PROJECT_ID}.{DATASET}.bi_P3fV4dWNeMkN5RJMhV8e_dash_calendario_v5`
-        WHERE {{incremental_filter}}
-        """,
-        
-        "assignment_data": f"""
-        -- 📋 ASSIGNMENT RAW DATA - Asignaciones only
-        SELECT 
-            archivo,
-            cod_luna,
-            cuenta,
-            negocio,
-            tramo_gestion,
-            creado_el,
-            CURRENT_TIMESTAMP() as extraction_timestamp
-        FROM `{PROJECT_ID}.{DATASET}.batch_P3fV4dWNeMkN5RJMhV8e_asignacion`
-        WHERE {{incremental_filter}}
-        """,
-        
-        "operation_data": f"""
-        -- ⚡ OPERATION RAW DATA - Gestiones only
-        SELECT 
-            document,
-            date,
-            campaign_name,
-            management,
-            sub_management,
-            'BOT' as canal,
-            CURRENT_TIMESTAMP() as extraction_timestamp
-        FROM `{PROJECT_ID}.{DATASET}.voicebot_P3fV4dWNeMkN5RJMhV8e`
-        WHERE {{incremental_filter}}
-        
-        UNION ALL
-        
-        SELECT 
-            document,
-            date,
-            campaign_name,
-            n1 as management,
-            n2 as sub_management,
-            'HUMANO' as canal,
-            CURRENT_TIMESTAMP() as extraction_timestamp
-        FROM `{PROJECT_ID}.{DATASET}.mibotair_P3fV4dWNeMkN5RJMhV8e`
-        WHERE {{incremental_filter}}
-        """,
-        
-        "productivity_data": f"""
-        -- 👥 PRODUCTIVITY RAW DATA - Gestiones humano only
-        SELECT 
-            document,
-            date,
-            campaign_name,
-            correo_agente,
-            n1,
-            n2,
-            n3,
-            CURRENT_TIMESTAMP() as extraction_timestamp
-        FROM `{PROJECT_ID}.{DATASET}.mibotair_P3fV4dWNeMkN5RJMhV8e`
-        WHERE {{incremental_filter}}
-          AND correo_agente IS NOT NULL
-        """
-    }
     
     @classmethod
     def get_config(cls, table_name: str) -> ExtractionConfig:
@@ -364,7 +390,7 @@ class ETLConfig:
     @classmethod
     def get_incremental_filter(cls, table_name: str, since_date: datetime) -> str:
         """
-        Generate incremental filter for a specific table
+        Generate incremental filter for a specific table with CORRECTED column names
         
         Args:
             table_name: Name of the table
@@ -378,16 +404,22 @@ class ETLConfig:
         # Apply lookback window for data quality
         lookback_date = since_date - timedelta(days=config.lookback_days)
         
-        # Simple date filters based on table
-        if table_name == "dashboard_data" or table_name == "evolution_data":
-            # Use calendario fecha_apertura
+        # CORRECTED filters based on real column names
+        if table_name == "raw_calendario":
+            # Use real column: fecha_apertura
             return f"fecha_apertura >= '{lookback_date.strftime('%Y-%m-%d')}'"
-        elif table_name == "assignment_data":
-            # Use asignaciones creado_el
+        elif table_name == "raw_asignaciones":
+            # Use real column: creado_el
             return f"DATE(creado_el) >= '{lookback_date.strftime('%Y-%m-%d')}'"
-        elif table_name in ["operation_data", "productivity_data"]:
-            # Use gestiones date
+        elif table_name in ["raw_trandeuda", "raw_pagos", "raw_contactos"]:
+            # Use real column: creado_el
+            return f"DATE(creado_el) >= '{lookback_date.strftime('%Y-%m-%d')}'"
+        elif table_name in ["raw_gestiones_bot", "raw_gestiones_humano"]:
+            # Use real column: date (DATETIME)
             return f"DATE(date) >= '{lookback_date.strftime('%Y-%m-%d')}'"
+        elif table_name == "gestiones_unificadas":
+            # Use real column: timestamp_gestion (TIMESTAMP)
+            return f"DATE(timestamp_gestion) >= '{lookback_date.strftime('%Y-%m-%d')}'"
         else:
             # Default fallback
             return f"DATE(creado_el) >= '{lookback_date.strftime('%Y-%m-%d')}'"
@@ -399,15 +431,24 @@ class ETLConfig:
     
     @classmethod
     def get_dashboard_tables(cls) -> List[str]:
-        """Get tables that feed the main dashboard"""
+        """Get core tables needed for dashboard calculation"""
         return [
-            name for name, config in cls.EXTRACTION_CONFIGS.items()
-            if config.table_type in [TableType.DASHBOARD, TableType.EVOLUTION]
+            "raw_calendario",           # Campaign definitions
+            "raw_asignaciones",         # Client assignments
+            "raw_trandeuda",           # Debt snapshots
+            "raw_pagos",               # Payments
+            "gestiones_unificadas"     # All gestiones with homologation
         ]
+    
+    @classmethod
+    def get_raw_source_tables(cls) -> List[str]:
+        """Get all raw source tables for initial extraction"""
+        return [name for name in cls.EXTRACTION_CONFIGS.keys() if name.startswith("raw_")]
 
 
 # 🎯 CONVENIENCE CONSTANTS FOR EASY IMPORTS
 DASHBOARD_TABLES = ETLConfig.get_dashboard_tables()
+RAW_SOURCE_TABLES = ETLConfig.get_raw_source_tables()
 ALL_TABLES = ETLConfig.list_tables()
 
 # Default extraction configuration
