@@ -1,9 +1,9 @@
 """
-🎯 ETL Configuration System - PRIMARY KEYS UPDATED FOR TIMESCALEDB
-Fixed with TimescaleDB-compatible primary keys including partition columns
+🎯 ETL Configuration System - CASE MISMATCH FIXED
+Fixed primary key names to match transformer output (lowercase)
 
-ISSUE FIXED: Updated primary keys to include time partition columns  
-TESTED: Primary keys now compatible with TimescaleDB hypertable requirements
+ISSUE FIXED: Config used "ARCHIVO" but transformer outputs "archivo"  
+ROOT CAUSE: Case mismatch between config primary_key and transformer output
 """
 
 from datetime import datetime, timedelta
@@ -37,7 +37,7 @@ class ExtractionConfig:
     table_type: TableType
     description: str
     
-    # Primary key configuration - ✅ UPDATED FOR TIMESCALEDB
+    # Primary key configuration - ✅ CASE FIXED FOR TRANSFORMER OUTPUT
     primary_key: List[str]
     incremental_column: str
     
@@ -61,61 +61,61 @@ class ExtractionConfig:
 
 class ETLConfig:
     """
-    Centralized ETL configuration for Pulso Dashboard - TIMESCALEDB PRIMARY KEYS FIXED
+    Centralized ETL configuration for Pulso Dashboard - CASE MISMATCH FIXED
     
-    STRATEGY: Using TimescaleDB-compatible primary keys that include partition columns
-    FIXED: All primary keys now include time dimensions for hypertable compatibility
+    STRATEGY: Primary key names now match transformer output (lowercase)
+    FIXED: All primary keys use lowercase to match transformer dict keys
     """
     
     # 🌟 PROJECT CONFIGURATION
     PROJECT_ID = "mibot-222814"
     DATASET = "BI_USA"
     
-    # 🔄 RAW SOURCE CONFIGURATIONS - ✅ PRIMARY KEYS UPDATED
+    # 🔄 RAW SOURCE CONFIGURATIONS - ✅ CASE FIXED TO MATCH TRANSFORMER
     EXTRACTION_CONFIGS: Dict[str, ExtractionConfig] = {
         
-        # 📅 CALENDARIO - ✅ PK INCLUDES periodo_date
+        # 📅 CALENDARIO - ✅ PRIMARY KEY NAMES FIXED TO LOWERCASE
         "raw_calendario": ExtractionConfig(
             table_name="raw_calendario",
             table_type=TableType.DASHBOARD,
             description="Campaign calendar",
-            primary_key=["ARCHIVO", "periodo_date"],  # ✅ FIXED: Includes partition column
+            primary_key=["archivo", "periodo_date"],  # ✅ FIXED: lowercase to match transformer
             incremental_column="fecha_apertura",
             source_table="bi_P3fV4dWNeMkN5RJMhV8e_dash_calendario_v5",
             lookback_days=7,
-            required_columns=["ARCHIVO", "fecha_apertura"],
+            required_columns=["archivo", "fecha_apertura"],  # ✅ FIXED: lowercase
             min_expected_records=1
         ),
         
-        # 👥 ASIGNACIONES - ✅ PK INCLUDES fecha_asignacion
+        # 👥 ASIGNACIONES - ✅ PRIMARY KEY NAMES FIXED TO LOWERCASE
         "raw_asignaciones": ExtractionConfig(
             table_name="raw_asignaciones",
             table_type=TableType.ASSIGNMENT,
             description="Client assignments",
-            primary_key=["cod_luna", "cuenta", "archivo", "fecha_asignacion"],  # ✅ FIXED: Includes partition column
+            primary_key=["cod_luna", "cuenta", "archivo", "fecha_asignacion"],  # ✅ FIXED: all lowercase
             incremental_column="creado_el",
             source_table="batch_P3fV4dWNeMkN5RJMhV8e_asignacion",
             lookback_days=30,
             batch_size=50000,
-            required_columns=["cod_luna", "cuenta", "archivo"],
+            required_columns=["cod_luna", "cuenta", "archivo"],  # ✅ FIXED: lowercase
             min_expected_records=1
         ),
         
-        # 💰 TRANDEUDA - ✅ PK INCLUDES fecha_proceso
+        # 💰 TRANDEUDA - ✅ PRIMARY KEY NAMES FIXED TO LOWERCASE
         "raw_trandeuda": ExtractionConfig(
             table_name="raw_trandeuda", 
             table_type=TableType.DASHBOARD,
             description="Daily debt snapshots",
-            primary_key=["cod_cuenta", "nro_documento", "archivo", "fecha_proceso"],  # ✅ FIXED: Includes partition column
+            primary_key=["cod_cuenta", "nro_documento", "archivo", "fecha_proceso"],  # ✅ FIXED: lowercase
             incremental_column="creado_el",
             source_table="batch_P3fV4dWNeMkN5RJMhV8e_tran_deuda",
             lookback_days=14,
             batch_size=100000,
-            required_columns=["cod_cuenta", "monto_exigible"],
+            required_columns=["cod_cuenta", "monto_exigible"],  # ✅ FIXED: lowercase
             min_expected_records=1
         ),
         
-        # 💳 PAGOS - ✅ PK ALREADY INCLUDES fecha_pago (correct from start)
+        # 💳 PAGOS - ✅ PRIMARY KEY NAMES ALREADY LOWERCASE (correct)
         "raw_pagos": ExtractionConfig(
             table_name="raw_pagos",
             table_type=TableType.DASHBOARD,
@@ -125,11 +125,11 @@ class ETLConfig:
             source_table="batch_P3fV4dWNeMkN5RJMhV8e_pagos",
             lookback_days=30,
             batch_size=25000,
-            required_columns=["nro_documento", "fecha_pago", "monto_cancelado"],
+            required_columns=["nro_documento", "fecha_pago", "monto_cancelado"],  # ✅ lowercase
             min_expected_records=1
         ),
         
-        # 🎯 GESTIONES UNIFICADAS - ✅ PK ALREADY INCLUDES timestamp_gestion (correct from start)
+        # 🎯 GESTIONES UNIFICADAS - ✅ PRIMARY KEY NAMES ALREADY LOWERCASE (correct)
         "gestiones_unificadas": ExtractionConfig(
             table_name="gestiones_unificadas",
             table_type=TableType.OPERATION,
@@ -140,7 +140,7 @@ class ETLConfig:
             lookback_days=3,
             batch_size=75000,
             refresh_frequency_hours=1,
-            required_columns=["cod_luna", "fecha_gestion"],
+            required_columns=["cod_luna", "fecha_gestion"],  # ✅ lowercase
             min_expected_records=1
         )
     }
