@@ -7,6 +7,7 @@ Features:
 - Monitor extraction status and progress
 - Manual table refresh capabilities
 - Comprehensive ETL health monitoring
+- Cancel running extractions
 """
 
 from datetime import datetime
@@ -71,6 +72,14 @@ class TableStatusResponse(BaseModel):
     error_message: Optional[str]
 
 
+class CancelResponse(BaseModel):
+    """Response model for cancellation operations"""
+    cancelled_extractions: int
+    cleaned_up_tasks: int
+    status: str
+    timestamp: datetime
+
+
 # =============================================================================
 # ROUTER SETUP - FIXED: Remove duplicate prefix
 # =============================================================================
@@ -86,6 +95,7 @@ class ETLAPI(LoggerMixin):
     - Trigger dashboard data refresh
     - Monitor extraction status
     - Manage individual table extractions
+    - Cancel running extractions
     """
     
     # =============================================================================
@@ -184,6 +194,171 @@ class ETLAPI(LoggerMixin):
                 status_code=500,
                 detail=f"Failed to refresh table {table_name}: {str(e)}"
             )
+    
+    # =============================================================================
+    # 🛑 NEW: CANCELLATION AND CONTROL ENDPOINTS
+    # =============================================================================
+    
+    @staticmethod
+    @router.post("/cancel", response_model=CancelResponse)
+    async def cancel_running_extractions():
+        """
+        🛑 Cancel all running ETL extractions
+        
+        Forcefully stops all running extractions and cleans up resources.
+        Useful when extractions are stuck or need to be stopped urgently.
+        
+        Returns:
+            CancelResponse with details of what was cancelled
+        """
+        try:
+            pipeline = get_pipeline()
+            
+            # Cancel running extractions
+            cancelled_count = 0
+            cleaned_count = 0
+            
+            # Try to cancel through pipeline if available
+            if hasattr(pipeline, 'cancel_all_extractions'):
+                result = await pipeline.cancel_all_extractions()
+                cancelled_count = result.get('cancelled_extractions', 0)
+                cleaned_count = result.get('cleaned_tasks', 0)
+            else:
+                # Fallback: Cleanup approach
+                cleanup_result = await pipeline.cleanup_and_recover()
+                cleaned_count = cleanup_result.get('cleaned_tasks', 0)
+            
+            # Update watermarks to mark cancelled extractions as failed
+            watermark_manager = await get_watermark_manager()
+            
+            # Get all tables with running status and mark them as cancelled
+            all_watermarks = await watermark_manager.get_all_watermarks()
+            running_tables = [w for w in all_watermarks if w.last_extraction_status in ['running', 'started']]
+            
+            for watermark in running_tables:
+                await watermark_manager.update_watermark(
+                    table_name=watermark.table_name,
+                    last_extracted_date=None,
+                    records_extracted=0,
+                    status='cancelled',
+                    error_message='Manually cancelled via API'
+                )
+                cancelled_count += 1
+            
+            return CancelResponse(
+                cancelled_extractions=cancelled_count,
+                cleaned_up_tasks=cleaned_count,
+                status="cancelled" if cancelled_count > 0 else "no_running_extractions",
+                timestamp=datetime.now()
+            )
+            
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to cancel extractions: {str(e)}"
+            )
+    
+    @staticmethod
+    @router.post("/cancel/table/{table_name}")
+    async def cancel_table_extraction(table_name: str):
+        """
+        🛑 Cancel extraction for a specific table
+        
+        Stops the extraction for a single table if it's currently running.
+        
+        Args:
+            table_name: Name of the table to cancel
+            
+        Returns:
+            Status of the cancellation
+        """
+        try:
+            # Validate table exists
+            if table_name not in ETLConfig.list_tables():
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Table {table_name} not found in ETL configuration"
+                )
+            
+            # Update watermark to mark as cancelled
+            watermark_manager = await get_watermark_manager()
+            watermark = await watermark_manager.get_watermark(table_name)
+            
+            if watermark and watermark.last_extraction_status in ['running', 'started']:
+                await watermark_manager.update_watermark(
+                    table_name=table_name,
+                    last_extracted_date=None,
+                    records_extracted=0,
+                    status='cancelled',
+                    error_message=f'Manually cancelled via API at {datetime.now()}'
+                )
+                
+                return success_response(
+                    message=f"Cancelled extraction for table {table_name}",
+                    data={
+                        "table_name": table_name,
+                        "previous_status": watermark.last_extraction_status,
+                        "cancelled_at": datetime.now().isoformat()
+                    }
+                )
+            else:
+                return success_response(
+                    message=f"Table {table_name} was not running",
+                    data={
+                        "table_name": table_name,
+                        "status": watermark.last_extraction_status if watermark else "never_run"
+                    }
+                )
+            
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to cancel table extraction: {str(e)}"
+            )
+    
+    @staticmethod
+    @router.post("/reset")
+    async def reset_etl_system():
+        """
+        🔄 Reset ETL system state
+        
+        Clears all watermarks and resets the system to initial state.
+        WARNING: This will cause all tables to be fully refreshed on next run.
+        
+        Returns:
+            Reset confirmation
+        """
+        try:
+            watermark_manager = await get_watermark_manager()
+            
+            # Get all watermarks before reset
+            all_watermarks = await watermark_manager.get_all_watermarks()
+            reset_count = len(all_watermarks)
+            
+            # Reset all watermarks
+            for watermark in all_watermarks:
+                await watermark_manager.reset_watermark(watermark.table_name)
+            
+            return success_response(
+                message="ETL system reset completed",
+                data={
+                    "reset_tables": reset_count,
+                    "reset_at": datetime.now().isoformat(),
+                    "warning": "All tables will be fully refreshed on next extraction"
+                }
+            )
+            
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to reset ETL system: {str(e)}"
+            )
+    
+    # =============================================================================
+    # STATUS AND MONITORING ENDPOINTS
+    # =============================================================================
     
     @staticmethod
     @router.get("/status", response_model=ETLStatusResponse)
