@@ -44,14 +44,5 @@ SELECT add_retention_policy(
     if_not_exists => TRUE
 );
 
--- Verify hypertables were created
-SELECT 
-    schemaname, 
-    tablename, 
-    num_dimensions, 
-    time_column_name,
-    time_interval
-FROM timescaledb_information.hypertables;
-
 -- Add comment explaining why etl_watermarks is not a hypertable
 COMMENT ON TABLE etl_watermarks IS 'ETL watermark tracking table - NOT a hypertable because it is metadata/configuration data, not time-series data';
