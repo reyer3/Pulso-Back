@@ -1,6 +1,6 @@
 -- ========================================
 -- 013: Create raw_trandeuda table for BigQuery extraction staging
--- TimescaleDB optimized version  
+-- TimescaleDB optimized version - PRIMARY KEY FIXED
 -- ========================================
 
 -- Raw staging table to store trandeuda (debt transactions) data from BigQuery before transformation
@@ -24,8 +24,8 @@ CREATE TABLE IF NOT EXISTS raw_trandeuda (
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
     
-    -- Primary key constraint
-    PRIMARY KEY (cod_cuenta, nro_documento, archivo),
+    -- ✅ FIXED: Primary key includes partitioning column
+    PRIMARY KEY (cod_cuenta, nro_documento, archivo, fecha_proceso),
     
     -- Business constraint
     CONSTRAINT chk_raw_trandeuda_monto_positive CHECK (monto_exigible >= 0)
