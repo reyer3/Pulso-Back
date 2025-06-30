@@ -259,20 +259,34 @@ async def run_hybrid_auto(args) -> bool:
         # Usar pipeline de catchup tradicional
         catchup_pipeline: CampaignCatchUpPipeline = await etl_dependencies.campaign_catchup_pipeline()
 
+        # 🔧 FIX: Solo pasar parámetros que acepta el método
         pipeline_params = {
             'force_refresh_all': args.force,
             'max_campaigns': args.limit,
-            'dry_run': args.dry_run,
-            'skip_validation': args.skip_validation,
-            'parallel_workers': args.parallel,
+            'batch_size': args.parallel,  # Usar parallel como batch_size
         }
 
         start_time = datetime.now()
 
         if args.dry_run:
-            logger.info("🔍 DRY RUN MODE")
-            result = await catchup_pipeline.validate_pending_campaigns()
+            logger.info("🔍 DRY RUN MODE - Listing campaigns to process...")
+            # Obtener campañas para mostrar qué se procesaría
+            campaigns = await catchup_pipeline.get_campaign_windows(limit=args.limit)
+            
+            logger.info("=" * 80)
+            logger.info("📋 DRY RUN RESULTS")
+            logger.info("=" * 80)
+            logger.info(f"📊 Total campaigns found: {len(campaigns)}")
+            
+            for i, campaign in enumerate(campaigns[:10], 1):  # Mostrar máximo 10
+                logger.info(f"  {i}. {campaign.archivo} ({campaign.fecha_apertura} - {campaign.fecha_cierre})")
+            
+            if len(campaigns) > 10:
+                logger.info(f"  ... and {len(campaigns) - 10} more campaigns")
+                
+            return True
         else:
+            # Ejecutar el pipeline real
             result = await catchup_pipeline.run_all_pending_campaigns(**pipeline_params)
 
         duration = (datetime.now() - start_time).total_seconds()
@@ -280,10 +294,15 @@ async def run_hybrid_auto(args) -> bool:
         logger.info("=" * 80)
         logger.info("📊 HYBRID AUTO RESULTS")
         logger.info("=" * 80)
-        logger.info(f"📊 Result: {result}")
+        logger.info(f"📊 Status: {result.get('status', 'unknown')}")
+        logger.info(f"🎯 Campaigns processed: {result.get('campaigns_processed', 0)}")
+        logger.info(f"✅ Successful: {result.get('campaigns_successful', 0)}")
+        logger.info(f"❌ Failed: {result.get('campaigns_failed', 0)}")
+        logger.info(f"📊 Raw records: {result.get('total_raw_records', 0):,}")
+        logger.info(f"📊 Mart records: {result.get('total_mart_records', 0):,}")
         logger.info(f"⏱️ Duration: {duration:.2f}s")
 
-        return True
+        return result.get('status') in ['completed', 'success']
 
     except Exception as e:
         logger.error(f"❌ Hybrid auto failed: {e}", exc_info=True)
