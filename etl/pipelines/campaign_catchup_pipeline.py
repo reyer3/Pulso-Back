@@ -251,47 +251,33 @@ class CampaignCatchUpPipeline(LoggerMixin):
     async def run_for_campaign(self, campaign: CampaignWindow) -> CampaignLoadResult:
         """
         Ejecuta el pipeline E2E para una sola campaña.
-        MEJORADO: Gestión granular de errores y métricas detalladas.
+        CORREGIDO: Ahora llama al método correcto `run_for_single_campaign`.
         """
         start_time = datetime.now(timezone.utc)
         watermark_name = f"campaign__{campaign.archivo}"
-
         self.logger.info(f"🔥 Starting End-to-End Pipeline for '{campaign.archivo}'")
-
-        # Inicializar watermark
-        await self.watermarks.start_extraction(
-            watermark_name,
-            f"e2e_run_{start_time.isoformat()}"
-        )
+        await self.watermarks.start_extraction(watermark_name, f"e2e_run_{start_time.isoformat()}")
 
         errors = []
-        tables_loaded = {}
-        raw_records = 0
-        mart_records = 0
+        raw_records_loaded = 0
         status = "success"
 
         try:
-            # Etapa 1: Cargar Datos Raw
-            self.logger.info(f"  -> Stage 1: Raw Data Pipeline for '{campaign.archivo}'...")
-            raw_records = await self.raw_data_pipeline.run_for_campaign(campaign)
-            tables_loaded["raw_total"] = raw_records
+            # Etapa 1: Cargar Datos Raw - ✅ CORRECCIÓN: Llamamos al nuevo método
+            self.logger.info(f"  -> Stage 1: Executing Raw Data Pipeline for '{campaign.archivo}'...")
+            raw_records_loaded = await self.raw_data_pipeline.run_for_single_campaign(campaign)
 
         except Exception as e:
             error_msg = f"Raw data pipeline failed: {str(e)}"
             errors.append(error_msg)
             self.logger.error(f"Stage 1 failed for '{campaign.archivo}': {e}", exc_info=True)
 
-        # Solo continuar a marts si raw fue exitoso
+        # Solo continuar a marts si la carga raw fue exitosa
         if not errors:
             try:
                 # Etapa 2: Construir Marts
-                self.logger.info(f"  -> Stage 2: Mart Build Pipeline for '{campaign.archivo}'...")
+                self.logger.info(f"  -> Stage 2: Executing Mart Build Pipeline for '{campaign.archivo}'...")
                 await self.mart_build_pipeline.run_for_campaign(campaign)
-
-                # Obtener conteo de registros de marts (opcional)
-                mart_records = await self._get_mart_records_count(campaign.archivo)
-                tables_loaded["mart_total"] = mart_records
-
             except Exception as e:
                 error_msg = f"Mart build pipeline failed: {str(e)}"
                 errors.append(error_msg)
@@ -299,7 +285,7 @@ class CampaignCatchUpPipeline(LoggerMixin):
 
         # Determinar status final
         if errors:
-            status = "partial" if raw_records > 0 else "failed"
+            status = "partial" if raw_records_loaded > 0 else "failed"
 
         duration = (datetime.now(timezone.utc) - start_time).total_seconds()
 

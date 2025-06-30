@@ -446,6 +446,46 @@ class HybridRawDataPipeline(LoggerMixin):
                 error_message=error_msg
             )
 
+    async def run_for_single_campaign(self, campaign: CampaignWindow) -> int:
+        """
+        🎯 NUEVO MÉTODO: Ejecuta la carga de TODAS las tablas raw para UNA SOLA campaña.
+        Este es el punto de entrada que usará el orquestador principal.
+        Devuelve el número total de registros cargados.
+        """
+        self.logger.info(f"🚀 Starting Raw Data load for single campaign: '{campaign.archivo}'")
+
+        tables_to_load = ETLConfig.get_raw_source_tables()
+        semaphore = asyncio.Semaphore(3)  # Limita la concurrencia
+
+        async def process_table(table_name: str):
+            async with semaphore:
+                return await self._etl_table_stream(
+                    table_name=table_name,
+                    campaign=campaign,
+                    extraction_strategy=ExtractionStrategy.CALENDAR_DRIVEN
+                )
+
+        tasks = [process_table(table_name) for table_name in tables_to_load]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        total_records = 0
+        failed_tables_info = []
+        for i, res in enumerate(results):
+            if isinstance(res, TableLoadResult) and res.status == 'success':
+                total_records += res.records_loaded
+            else:
+                table_name = tables_to_load[i]
+                error_msg = str(res.error_message) if isinstance(res, TableLoadResult) else str(res)
+                failed_tables_info.append(f"{table_name}: {error_msg}")
+
+        if failed_tables_info:
+            raise Exception(
+                f"Raw data pipeline failed for campaign '{campaign.archivo}'. Errors in tables: {'; '.join(failed_tables_info)}")
+
+        self.logger.info(f"✅ Raw Data load for '{campaign.archivo}' finished. Loaded {total_records} records.")
+        return total_records
+
+
     async def run_calendar_backfill(
             self,
             campaigns: List[CampaignWindow],
