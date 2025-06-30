@@ -8,9 +8,9 @@ import asyncio
 import sys
 from typing import Dict, Any
 
-from app.etl.config import ETLConfig
-from app.etl.transformers.unified_transformer import get_unified_transformer_registry
-from app.etl.watermarks import get_watermark_manager
+from etl.config import ETLConfig
+from etl import get_unified_transformer_registry
+from etl import get_watermark_manager
 from app.database.connection import get_database_manager
 
 

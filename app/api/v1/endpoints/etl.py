@@ -12,22 +12,19 @@ Features:
 
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
-import asyncio
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Depends
 from pydantic import BaseModel, Field
 
-from app.etl.pipelines.extraction_pipeline import (
-    trigger_dashboard_refresh,
-    trigger_table_refresh, 
+from etl import (
+    trigger_table_refresh,
     get_etl_status,
     get_pipeline
 )
-from app.etl.config import ETLConfig
-from app.etl.watermarks import get_watermark_manager
+from etl.config import ETLConfig
+from etl import get_watermark_manager
 from app.core.logging import LoggerMixin
-from app.models.base import success_response, error_response
-
+from app.models.base import success_response
 
 
 # =============================================================================
@@ -577,7 +574,7 @@ class ETLAPI(LoggerMixin):
     @router.get("/config/extraction-modes")
     async def get_extraction_modes():
         """Get available extraction modes"""
-        from app.etl.config import ExtractionMode
+        from etl.config import ExtractionMode
         
         return success_response(
             data={
@@ -667,7 +664,7 @@ class ETLAPI(LoggerMixin):
 # BACKGROUND TASK FUNCTIONS
 # =============================================================================
 # Updated import for the new CampaignCatchUpPipeline
-from app.etl.pipelines.campaign_catchup_pipeline import get_campaign_catchup_pipeline
+from etl import get_campaign_catchup_pipeline
 
 async def _execute_dashboard_refresh(
     force: bool = False, 
@@ -680,7 +677,7 @@ async def _execute_dashboard_refresh(
         
         if tables:
             # Refresh specific tables
-            from app.etl.config import ExtractionMode
+            from etl.config import ExtractionMode
             result = await pipeline.run_incremental_pipeline(
                 table_names=tables,
                 mode=ExtractionMode.INCREMENTAL,

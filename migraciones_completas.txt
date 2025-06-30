@@ -1,0 +1,1183 @@
+-- /home/reyer3/Projects/Pulso-Back/migrations/001-create-watermarks-table.sql --
+-- Watermark tracking table for ETL incremental processing
+-- depends:
+
+CREATE TABLE etl_watermarks (
+    id SERIAL PRIMARY KEY,
+    table_name VARCHAR(100) NOT NULL UNIQUE,
+    last_extracted_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    last_extraction_status VARCHAR(20) NOT NULL DEFAULT 'success',
+    records_extracted INTEGER DEFAULT 0,
+    extraction_duration_seconds FLOAT DEFAULT 0.0,
+    error_message TEXT,
+    extraction_id VARCHAR(50),
+    metadata JSONB DEFAULT '{}',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Performance indexes
+CREATE INDEX idx_etl_watermarks_table_name ON etl_watermarks(table_name);
+CREATE INDEX idx_etl_watermarks_status ON etl_watermarks(last_extraction_status);
+CREATE INDEX idx_etl_watermarks_updated ON etl_watermarks(updated_at);
+
+-- Comments for documentation
+COMMENT ON TABLE etl_watermarks IS 'Tracks extraction watermarks for incremental ETL processing';
+COMMENT ON COLUMN etl_watermarks.table_name IS 'Name of the table being tracked';
+COMMENT ON COLUMN etl_watermarks.last_extracted_at IS 'Timestamp of last successful extraction';
+COMMENT ON COLUMN etl_watermarks.last_extraction_status IS 'Status: success, failed, running';
+COMMENT ON COLUMN etl_watermarks.records_extracted IS 'Number of records processed in last extraction';
+COMMENT ON COLUMN etl_watermarks.extraction_duration_seconds IS 'Duration of last extraction in seconds';
+COMMENT ON COLUMN etl_watermarks.error_message IS 'Error message if extraction failed';
+COMMENT ON COLUMN etl_watermarks.extraction_id IS 'Unique identifier for extraction run';
+COMMENT ON COLUMN etl_watermarks.metadata IS 'Additional metadata as JSON';
+\n
+-- /home/reyer3/Projects/Pulso-Back/migrations/002-create-etl-execution-log-table.sql --
+-- Create ETL execution log table
+-- file: 002-create-etl-execution-log-table.sql
+-- depends:
+
+CREATE TABLE IF NOT EXISTS etl_execution_log (
+    id SERIAL,
+    PRIMARY KEY (id, started_at),
+    execution_id UUID NOT NULL,
+    pipeline_name VARCHAR(255) NOT NULL,
+    status VARCHAR(50) NOT NULL,
+    started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    completed_at TIMESTAMPTZ,
+    error_message TEXT,
+    metadata JSONB,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Convert to hypertable for time-series optimization
+SELECT create_hypertable('etl_execution_log', 'started_at', if_not_exists => TRUE);
+
+-- Create useful indexes
+CREATE INDEX IF NOT EXISTS idx_etl_execution_log_pipeline 
+ON etl_execution_log (pipeline_name);
+
+CREATE INDEX IF NOT EXISTS idx_etl_execution_log_status 
+ON etl_execution_log (status);
+
+CREATE INDEX IF NOT EXISTS idx_etl_execution_log_execution_id 
+ON etl_execution_log (execution_id);
+\n
+-- /home/reyer3/Projects/Pulso-Back/migrations/002-enable-timescaledb.sql --
+-- Enable TimescaleDB extension
+-- depends: 001-create-watermarks-table
+
+-- Create TimescaleDB extension if available
+CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;
+
+
+-- Comment
+COMMENT ON EXTENSION timescaledb IS 'TimescaleDB extension for time-series data optimization';
+\n
+-- /home/reyer3/Projects/Pulso-Back/migrations/003-create-dashboard-data-table.sql --
+-- Main dashboard metrics table, optimized for time-series analysis with TimescaleDB
+-- depends: 001-create-watermarks-table
+
+CREATE TABLE dashboard_data (
+    fecha_foto DATE NOT NULL,
+    archivo VARCHAR(100) NOT NULL,
+    cartera VARCHAR(50) NOT NULL,
+    servicio VARCHAR(20) NOT NULL,
+    cuentas INTEGER NOT NULL DEFAULT 0,
+    clientes INTEGER NOT NULL DEFAULT 0,
+    deuda_asig FLOAT NOT NULL DEFAULT 0.0,
+    deuda_act FLOAT NOT NULL DEFAULT 0.0,
+    cuentas_gestionadas INTEGER NOT NULL DEFAULT 0,
+    cuentas_cd INTEGER NOT NULL DEFAULT 0,
+    cuentas_ci INTEGER NOT NULL DEFAULT 0,
+    cuentas_sc INTEGER NOT NULL DEFAULT 0,
+    cuentas_sg INTEGER NOT NULL DEFAULT 0,
+    cuentas_pdp INTEGER NOT NULL DEFAULT 0,
+    recupero FLOAT NOT NULL DEFAULT 0.0,
+    pct_cober FLOAT NOT NULL DEFAULT 0.0,
+    pct_contac FLOAT NOT NULL DEFAULT 0.0,
+    pct_cd FLOAT NOT NULL DEFAULT 0.0,
+    pct_ci FLOAT NOT NULL DEFAULT 0.0,
+    pct_conversion FLOAT NOT NULL DEFAULT 0.0,
+    pct_efectividad FLOAT NOT NULL DEFAULT 0.0,
+    pct_cierre FLOAT NOT NULL DEFAULT 0.0,
+    inten FLOAT NOT NULL DEFAULT 0.0,
+    fecha_procesamiento TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (fecha_foto, archivo, cartera, servicio),
+    CONSTRAINT chk_dashboard_cuentas_positive CHECK (cuentas >= 0),
+    CONSTRAINT chk_dashboard_deuda_positive CHECK (deuda_asig >= 0)
+);
+
+-- Indexes for performance
+CREATE INDEX idx_dashboard_data_fecha_foto ON dashboard_data(fecha_foto DESC);
+CREATE INDEX idx_dashboard_data_cartera ON dashboard_data(cartera);
+CREATE INDEX idx_dashboard_data_servicio ON dashboard_data(servicio);
+CREATE INDEX idx_dashboard_data_procesamiento ON dashboard_data(fecha_procesamiento);
+
+-- TimescaleDB hypertable for time-series data
+SELECT create_hypertable('dashboard_data', by_range('fecha_foto', INTERVAL '7 days'), if_not_exists => TRUE);
+
+-- Retention policy to manage data storage
+SELECT add_retention_policy('dashboard_data', INTERVAL '2 years', if_not_exists => TRUE);
+
+-- Comments for documentation
+COMMENT ON TABLE dashboard_data IS 'Main dashboard metrics by date, campaign, portfolio and service';
+COMMENT ON COLUMN dashboard_data.fecha_foto IS 'Snapshot date for the metrics';
+COMMENT ON COLUMN dashboard_data.archivo IS 'Campaign file identifier';
+COMMENT ON COLUMN dashboard_data.cartera IS 'Portfolio type';
+COMMENT ON COLUMN dashboard_data.servicio IS 'Service type (e.g., MOVIL, FIJA)';
+COMMENT ON COLUMN dashboard_data.cuentas IS 'Total accounts';
+COMMENT ON COLUMN dashboard_data.clientes IS 'Total clients';
+COMMENT ON COLUMN dashboard_data.deuda_asig IS 'Assigned debt amount';
+COMMENT ON COLUMN dashboard_data.deuda_act IS 'Current debt amount';
+COMMENT ON COLUMN dashboard_data.cuentas_gestionadas IS 'Number of managed accounts';
+COMMENT ON COLUMN dashboard_data.cuentas_cd IS 'Accounts with direct contact';
+COMMENT ON COLUMN dashboard_data.cuentas_ci IS 'Accounts with indirect contact';
+COMMENT ON COLUMN dashboard_data.cuentas_sc IS 'Accounts with no contact';
+COMMENT ON COLUMN dashboard_data.cuentas_sg IS 'Accounts with no management actions';
+COMMENT ON COLUMN dashboard_data.cuentas_pdp IS 'Accounts with a Promise to Pay (PDP)';
+COMMENT ON COLUMN dashboard_data.recupero IS 'Total amount recovered';
+COMMENT ON COLUMN dashboard_data.pct_cober IS 'Coverage percentage';
+COMMENT ON COLUMN dashboard_data.pct_contac IS 'Contact percentage';
+COMMENT ON COLUMN dashboard_data.pct_cd IS 'Direct contact percentage';
+COMMENT ON COLUMN dashboard_data.pct_ci IS 'Indirect contact percentage';
+COMMENT ON COLUMN dashboard_data.pct_conversion IS 'PDP conversion percentage';
+COMMENT ON COLUMN dashboard_data.pct_efectividad IS 'Effectiveness percentage';
+COMMENT ON COLUMN dashboard_data.pct_cierre IS 'Closure percentage';
+COMMENT ON COLUMN dashboard_data.inten IS 'Management intensity';
+COMMENT ON COLUMN dashboard_data.fecha_procesamiento IS 'Timestamp of when the data was processed';
+\n
+-- /home/reyer3/Projects/Pulso-Back/migrations/003-create-timescaledb-hypertables.sql --
+-- Convert appropriate ETL tables to TimescaleDB hypertables for better time-series performance
+-- depends: 002-enable-timescaledb
+
+-- NOTE: etl_watermarks is NOT converted to hypertable because:
+-- 1. It's a small metadata table (one record per ETL table)
+-- 2. Primary key (id) doesn't include partitioning column (last_extracted_at)
+-- 3. Not suitable for time-series partitioning (configuration data, not time-series data)
+
+-- Create schema for ETL time-series data
+CREATE SCHEMA IF NOT EXISTS etl_timeseries;
+
+-- Create ETL metrics table as hypertable for monitoring time-series data
+CREATE TABLE IF NOT EXISTS etl_timeseries.extraction_metrics (
+    time TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    table_name TEXT NOT NULL,
+    records_processed INTEGER,
+    duration_seconds FLOAT,
+    memory_used_mb FLOAT,
+    cpu_percent FLOAT,
+    extraction_id TEXT,
+    status TEXT,
+    metadata JSONB
+);
+
+-- Convert extraction_metrics to hypertable (this is suitable for time-series)
+SELECT create_hypertable(
+    'etl_timeseries.extraction_metrics', 
+    'time',
+    if_not_exists => TRUE,
+    chunk_time_interval => INTERVAL '1 hour'
+);
+
+-- Create indexes for better query performance
+CREATE INDEX IF NOT EXISTS idx_extraction_metrics_table_time 
+    ON etl_timeseries.extraction_metrics (table_name, time DESC);
+
+CREATE INDEX IF NOT EXISTS idx_extraction_metrics_status_time 
+    ON etl_timeseries.extraction_metrics (status, time DESC);
+
+-- Add data retention policy (keep data for 30 days)
+SELECT add_retention_policy(
+    'etl_timeseries.extraction_metrics', 
+    INTERVAL '30 days',
+    if_not_exists => TRUE
+);
+
+-- Add comment explaining why etl_watermarks is not a hypertable
+COMMENT ON TABLE etl_watermarks IS 'ETL watermark tracking table - NOT a hypertable because it is metadata/configuration data, not time-series data';
+\n
+-- /home/reyer3/Projects/Pulso-Back/migrations/004-create-evolution-data-table.sql --
+-- Time series data for evolution analysis, optimized with TimescaleDB
+-- depends: 001-create-watermarks-table
+
+CREATE TABLE evolution_data (
+    fecha_foto DATE NOT NULL,
+    archivo VARCHAR(100) NOT NULL,
+    cartera VARCHAR(50) NOT NULL,
+    servicio VARCHAR(20) NOT NULL,
+    pct_cober FLOAT NOT NULL DEFAULT 0.0,
+    pct_contac FLOAT NOT NULL DEFAULT 0.0,
+    pct_efectividad FLOAT NOT NULL DEFAULT 0.0,
+    pct_cierre FLOAT NOT NULL DEFAULT 0.0,
+    recupero FLOAT NOT NULL DEFAULT 0.0,
+    cuentas INTEGER NOT NULL DEFAULT 0,
+    fecha_procesamiento TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (fecha_foto, archivo)
+);
+
+-- Indexes for performance
+CREATE INDEX idx_evolution_data_fecha_foto ON evolution_data(fecha_foto DESC);
+CREATE INDEX idx_evolution_data_cartera ON evolution_data(cartera);
+CREATE INDEX idx_evolution_data_composite ON evolution_data(fecha_foto, cartera);
+
+-- TimescaleDB hypertable for time-series data
+SELECT create_hypertable('evolution_data', by_range('fecha_foto', INTERVAL '7 days'), if_not_exists => TRUE);
+
+-- Retention policy to manage data storage
+SELECT add_retention_policy('evolution_data', INTERVAL '2 years', if_not_exists => TRUE);
+
+-- Comments for documentation
+COMMENT ON TABLE evolution_data IS 'Time series data for evolution analysis';
+COMMENT ON COLUMN evolution_data.fecha_foto IS 'Snapshot date for the metrics';
+COMMENT ON COLUMN evolution_data.archivo IS 'Campaign file identifier';
+COMMENT ON COLUMN evolution_data.cartera IS 'Portfolio type';
+COMMENT ON COLUMN evolution_data.servicio IS 'Service type';
+COMMENT ON COLUMN evolution_data.pct_cober IS 'Coverage percentage over time';
+COMMENT ON COLUMN evolution_data.pct_contac IS 'Contact percentage over time';
+COMMENT ON COLUMN evolution_data.pct_efectividad IS 'Effectiveness percentage over time';
+COMMENT ON COLUMN evolution_data.pct_cierre IS 'Closure percentage over time';
+COMMENT ON COLUMN evolution_data.recupero IS 'Recovered amount over time';
+COMMENT ON COLUMN evolution_data.cuentas IS 'Total accounts over time';
+COMMENT ON COLUMN evolution_data.fecha_procesamiento IS 'Timestamp of when the data was processed';
+\n
+-- /home/reyer3/Projects/Pulso-Back/migrations/005-create-assignment-data-table.sql --
+-- Assignment composition data by period and portfolio
+-- depends: 001-create-watermarks-table
+
+CREATE TABLE assignment_data (
+    periodo VARCHAR(7) NOT NULL,
+    archivo VARCHAR(100) NOT NULL,
+    cartera VARCHAR(50) NOT NULL,
+    clientes INTEGER NOT NULL DEFAULT 0,
+    cuentas INTEGER NOT NULL DEFAULT 0,
+    deuda_asig FLOAT NOT NULL DEFAULT 0.0,
+    deuda_actual FLOAT NOT NULL DEFAULT 0.0,
+    ticket_promedio FLOAT NOT NULL DEFAULT 0.0,
+    fecha_procesamiento TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (periodo, archivo, cartera)
+);
+
+-- Indexes for performance
+CREATE INDEX idx_assignment_data_periodo ON assignment_data(periodo);
+CREATE INDEX idx_assignment_data_cartera ON assignment_data(cartera);
+
+-- Comments for documentation
+COMMENT ON TABLE assignment_data IS 'Assignment composition data by period and portfolio';
+COMMENT ON COLUMN assignment_data.periodo IS 'Period in YYYY-MM format';
+COMMENT ON COLUMN assignment_data.archivo IS 'Campaign file identifier';
+COMMENT ON COLUMN assignment_data.cartera IS 'Portfolio type';
+COMMENT ON COLUMN assignment_data.clientes IS 'Total clients in the assignment';
+COMMENT ON COLUMN assignment_data.cuentas IS 'Total accounts in the assignment';
+COMMENT ON COLUMN assignment_data.deuda_asig IS 'Total assigned debt';
+COMMENT ON COLUMN assignment_data.deuda_actual IS 'Current debt amount';
+COMMENT ON COLUMN assignment_data.ticket_promedio IS 'Average debt per account';
+COMMENT ON COLUMN assignment_data.fecha_procesamiento IS 'Timestamp of when the data was processed';
+\n
+-- /home/reyer3/Projects/Pulso-Back/migrations/006-create-operation-data-table.sql --
+-- Hourly operational metrics by channel, optimized with TimescaleDB
+-- depends: 001-create-watermarks-table
+
+CREATE TABLE operation_data (
+    fecha_foto DATE NOT NULL,
+    hora INTEGER NOT NULL,
+    canal VARCHAR(20) NOT NULL,
+    archivo VARCHAR(100) NOT NULL DEFAULT 'GENERAL',
+    total_gestiones INTEGER NOT NULL DEFAULT 0,
+    contactos_efectivos INTEGER NOT NULL DEFAULT 0,
+    contactos_no_efectivos INTEGER NOT NULL DEFAULT 0,
+    total_pdp INTEGER NOT NULL DEFAULT 0,
+    tasa_contacto FLOAT NOT NULL DEFAULT 0.0,
+    tasa_conversion FLOAT NOT NULL DEFAULT 0.0,
+    fecha_procesamiento TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (fecha_foto, hora, canal, archivo),
+    CONSTRAINT chk_operation_hora_valid CHECK (hora >= 0 AND hora <= 23)
+);
+
+-- Indexes for performance
+CREATE INDEX idx_operation_data_fecha_foto ON operation_data(fecha_foto DESC);
+CREATE INDEX idx_operation_data_hora ON operation_data(hora);
+CREATE INDEX idx_operation_data_canal ON operation_data(canal);
+CREATE INDEX idx_operation_data_composite ON operation_data(fecha_foto, canal);
+
+-- TimescaleDB hypertable for time-series data
+SELECT create_hypertable('operation_data', by_range('fecha_foto', INTERVAL '1 day'), if_not_exists => TRUE);
+
+-- Retention policy to manage data storage
+SELECT add_retention_policy('operation_data', INTERVAL '1 year', if_not_exists => TRUE);
+
+-- Comments for documentation
+COMMENT ON TABLE operation_data IS 'Hourly operational metrics by channel';
+COMMENT ON COLUMN operation_data.fecha_foto IS 'Operation date';
+COMMENT ON COLUMN operation_data.hora IS 'Hour of the day (0-23)';
+COMMENT ON COLUMN operation_data.canal IS 'Channel (e.g., BOT, HUMANO)';
+COMMENT ON COLUMN operation_data.archivo IS 'Campaign identifier, defaults to GENERAL';
+COMMENT ON COLUMN operation_data.total_gestiones IS 'Total management actions';
+COMMENT ON COLUMN operation_data.contactos_efectivos IS 'Number of effective contacts';
+COMMENT ON COLUMN operation_data.contactos_no_efectivos IS 'Number of non-effective contacts';
+COMMENT ON COLUMN operation_data.total_pdp IS 'Total Promises to Pay (PDP) made';
+COMMENT ON COLUMN operation_data.tasa_contacto IS 'Contact rate percentage';
+COMMENT ON COLUMN operation_data.tasa_conversion IS 'PDP conversion rate percentage';
+COMMENT ON COLUMN operation_data.fecha_procesamiento IS 'Timestamp of when the data was processed';
+\n
+-- /home/reyer3/Projects/Pulso-Back/migrations/007-create-productivity-data-table.sql --
+-- Daily productivity metrics by agent, optimized with TimescaleDB
+-- depends: 001-create-watermarks-table
+
+CREATE TABLE productivity_data (
+    fecha_foto DATE NOT NULL,
+    correo_agente VARCHAR(100) NOT NULL,
+    archivo VARCHAR(100) NOT NULL DEFAULT 'GENERAL',
+    total_gestiones INTEGER NOT NULL DEFAULT 0,
+    contactos_efectivos INTEGER NOT NULL DEFAULT 0,
+    total_pdp INTEGER NOT NULL DEFAULT 0,
+    peso_total FLOAT NOT NULL DEFAULT 0.0,
+    tasa_contacto FLOAT NOT NULL DEFAULT 0.0,
+    tasa_conversion FLOAT NOT NULL DEFAULT 0.0,
+    score_productividad FLOAT NOT NULL DEFAULT 0.0,
+    nombre_agente VARCHAR(100),
+    dni_agente VARCHAR(20),
+    equipo VARCHAR(50),
+    fecha_procesamiento TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (fecha_foto, correo_agente, archivo)
+);
+
+-- Indexes for performance
+CREATE INDEX idx_productivity_data_fecha_foto ON productivity_data(fecha_foto DESC);
+CREATE INDEX idx_productivity_data_agente ON productivity_data(correo_agente);
+CREATE INDEX idx_productivity_data_equipo ON productivity_data(equipo);
+CREATE INDEX idx_productivity_data_composite ON productivity_data(fecha_foto, equipo);
+
+-- TimescaleDB hypertable for time-series data
+SELECT create_hypertable('productivity_data', by_range('fecha_foto', INTERVAL '7 days'), if_not_exists => TRUE);
+
+-- Retention policy to manage data storage
+SELECT add_retention_policy('productivity_data', INTERVAL '2 years', if_not_exists => TRUE);
+
+-- Comments for documentation
+COMMENT ON TABLE productivity_data IS 'Daily productivity metrics by agent';
+COMMENT ON COLUMN productivity_data.fecha_foto IS 'Performance date';
+COMMENT ON COLUMN productivity_data.correo_agente IS 'Agent email address';
+COMMENT ON COLUMN productivity_data.archivo IS 'Campaign identifier, defaults to GENERAL';
+COMMENT ON COLUMN productivity_data.total_gestiones IS 'Total management actions by the agent';
+COMMENT ON COLUMN productivity_data.contactos_efectivos IS 'Effective contacts made by the agent';
+COMMENT ON COLUMN productivity_data.total_pdp IS 'Total Promises to Pay (PDP) secured by the agent';
+COMMENT ON COLUMN productivity_data.peso_total IS 'Total weight or score for actions';
+COMMENT ON COLUMN productivity_data.tasa_contacto IS 'Agent-specific contact rate';
+COMMENT ON COLUMN productivity_data.tasa_conversion IS 'Agent-specific PDP conversion rate';
+COMMENT ON COLUMN productivity_data.score_productividad IS 'Overall productivity score for the agent';
+COMMENT ON COLUMN productivity_data.nombre_agente IS 'Agent full name (denormalized)';
+COMMENT ON COLUMN productivity_data.dni_agente IS 'Agent DNI (denormalized)';
+COMMENT ON COLUMN productivity_data.equipo IS 'Agent team name (denormalized)';
+COMMENT ON COLUMN productivity_data.fecha_procesamiento IS 'Timestamp of when the data was processed';
+\n
+-- /home/reyer3/Projects/Pulso-Back/migrations/008-create-cuenta-campana-state-table.sql --
+-- Create cuenta_campana_state table for tracking account states per campaign window
+-- depends: 003-create-dashboard-data-table
+
+CREATE TABLE cuenta_campana_state (
+    archivo VARCHAR(200) NOT NULL,              -- Campaign identifier (from calendario)
+    cod_luna VARCHAR(50) NOT NULL,              -- Client identifier  
+    cuenta VARCHAR(50) NOT NULL,                -- Account identifier
+    fecha_apertura DATE NOT NULL,               -- Campaign start (from calendario)
+    fecha_cierre DATE,                          -- Campaign end (from calendario, nullable for open campaigns)
+    
+    -- Account state within this campaign
+    monto_inicial DECIMAL(15,2) DEFAULT 0.0,    -- Initial debt at campaign start
+    monto_actual DECIMAL(15,2) DEFAULT 0.0,     -- Current debt in campaign
+    fecha_ultima_actualizacion DATE,            -- Last debt update date
+    
+    -- Activity flags for business logic
+    tiene_deuda_activa BOOLEAN DEFAULT FALSE,   -- Has active debt > 0
+    es_cuenta_gestionable BOOLEAN DEFAULT FALSE, -- Is in scope for management
+    
+    -- Metadata
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    
+    PRIMARY KEY (archivo, cod_luna, cuenta)
+);
+
+-- Performance indexes
+CREATE INDEX idx_cuenta_campana_archivo ON cuenta_campana_state(archivo);
+CREATE INDEX idx_cuenta_campana_fecha_apertura ON cuenta_campana_state(fecha_apertura);
+CREATE INDEX idx_cuenta_campana_cod_luna ON cuenta_campana_state(cod_luna);
+CREATE INDEX idx_cuenta_campana_gestionable ON cuenta_campana_state(es_cuenta_gestionable) WHERE es_cuenta_gestionable = TRUE;
+
+-- NOTE: cuenta_campana_state is NOT converted to hypertable because:
+-- 1. It's account state data per campaign (configuration/lookup table)
+-- 2. Primary key doesn't include partitioning column (fecha_apertura)  
+-- 3. Not high-volume time-series data - it's business state data
+
+-- Comments for documentation
+COMMENT ON TABLE cuenta_campana_state IS 'Tracks account states within campaign windows for accurate metric calculation - NOT a hypertable (state data, not time-series)';
+COMMENT ON COLUMN cuenta_campana_state.archivo IS 'Campaign file identifier from calendario table';
+COMMENT ON COLUMN cuenta_campana_state.cod_luna IS 'Client identifier (can have multiple accounts)';
+COMMENT ON COLUMN cuenta_campana_state.cuenta IS 'Specific account identifier';
+COMMENT ON COLUMN cuenta_campana_state.es_cuenta_gestionable IS 'Whether account is in scope for management actions';
+COMMENT ON COLUMN cuenta_campana_state.monto_inicial IS 'Account debt at campaign start (for coverage calculation)';
+COMMENT ON COLUMN cuenta_campana_state.monto_actual IS 'Current account debt (for closure calculation)';
+\n
+-- /home/reyer3/Projects/Pulso-Back/migrations/009-create-gestion-cuenta-impact-table.sql --
+-- Create gestion_cuenta_impact table for mapping gestiones to affected accounts
+-- depends: 008-create-cuenta-campana-state-table
+
+CREATE TABLE gestion_cuenta_impact (
+    archivo VARCHAR(200) NOT NULL,              -- Campaign identifier
+    cod_luna VARCHAR(50) NOT NULL,              -- Client who was contacted
+    timestamp_gestion TIMESTAMP WITH TIME ZONE NOT NULL, -- When the gestión occurred
+    cuenta VARCHAR(50) NOT NULL,                -- Specific account impacted by this gestión
+    
+    -- Gestión details (from gestiones_unificadas view)
+    canal_origen VARCHAR(20) NOT NULL,          -- 'BOT' | 'HUMANO'
+    contactabilidad VARCHAR(50),                -- 'Contacto Efectivo' | 'Contacto No Efectivo'
+    es_contacto_efectivo BOOLEAN DEFAULT FALSE, -- Flag for PCT_CONTAC calculation
+    es_compromiso BOOLEAN DEFAULT FALSE,        -- Flag for PCT_EFECTIVIDAD calculation
+    peso_gestion INTEGER DEFAULT 0,             -- Gestión weight for intensity calculation
+    
+    -- Business context at time of gestión
+    monto_deuda_momento DECIMAL(15,2) DEFAULT 0.0, -- Account debt at time of gestión
+    
+    -- Derived business flags for easier aggregation
+    es_cuenta_con_deuda BOOLEAN DEFAULT FALSE,   -- Had debt > 0 at moment of gestión
+    
+    -- Metadata
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    
+    PRIMARY KEY (archivo, cod_luna, timestamp_gestion, cuenta)
+);
+
+-- Performance indexes for KPI calculation queries
+CREATE INDEX idx_gestion_impact_archivo ON gestion_cuenta_impact(archivo);
+CREATE INDEX idx_gestion_impact_timestamp ON gestion_cuenta_impact(timestamp_gestion);
+CREATE INDEX idx_gestion_impact_cod_luna ON gestion_cuenta_impact(cod_luna);
+CREATE INDEX idx_gestion_impact_cuenta ON gestion_cuenta_impact(cuenta);
+CREATE INDEX idx_gestion_impact_contacto_efectivo ON gestion_cuenta_impact(es_contacto_efectivo) WHERE es_contacto_efectivo = TRUE;
+CREATE INDEX idx_gestion_impact_compromiso ON gestion_cuenta_impact(es_compromiso) WHERE es_compromiso = TRUE;
+
+-- Composite indexes for common KPI queries
+CREATE INDEX idx_gestion_impact_kpi_coverage ON gestion_cuenta_impact(archivo, es_contacto_efectivo, cuenta);
+CREATE INDEX idx_gestion_impact_kpi_contact ON gestion_cuenta_impact(archivo, contactabilidad);
+CREATE INDEX idx_gestion_impact_kpi_effectiveness ON gestion_cuenta_impact(archivo, es_contacto_efectivo, es_compromiso);
+
+-- TimescaleDB hypertable for time-series performance
+SELECT create_hypertable('gestion_cuenta_impact', by_range('timestamp_gestion', INTERVAL '7 days'), if_not_exists => TRUE);
+
+-- Retention policy for operational data (keep 1 year)
+SELECT add_retention_policy('gestion_cuenta_impact', INTERVAL '1 year', if_not_exists => TRUE);
+
+-- Comments for documentation
+COMMENT ON TABLE gestion_cuenta_impact IS 'Maps each gestión to the specific accounts that were impacted, enabling accurate KPI calculation';
+COMMENT ON COLUMN gestion_cuenta_impact.archivo IS 'Campaign identifier linking to cuenta_campana_state';
+COMMENT ON COLUMN gestion_cuenta_impact.cod_luna IS 'Client identifier - the person who was contacted';
+COMMENT ON COLUMN gestion_cuenta_impact.cuenta IS 'Specific account impacted by the gestión (one client can have multiple accounts)';
+COMMENT ON COLUMN gestion_cuenta_impact.timestamp_gestion IS 'Exact timestamp when gestión occurred';
+COMMENT ON COLUMN gestion_cuenta_impact.es_contacto_efectivo IS 'Used for PCT_CONTAC calculation (effective contacts / total contacts)';
+COMMENT ON COLUMN gestion_cuenta_impact.es_compromiso IS 'Used for PCT_EFECTIVIDAD calculation (commitments / effective contacts)';
+COMMENT ON COLUMN gestion_cuenta_impact.monto_deuda_momento IS 'Account debt at time of gestión for context';
+\n
+-- /home/reyer3/Projects/Pulso-Back/migrations/010-create-pago-deduplication-table.sql --
+-- Create pago_deduplication table for unique payment tracking per campaign window
+-- depends: 009-create-gestion-cuenta-impact-table
+
+CREATE TABLE pago_deduplication (
+    archivo VARCHAR(200) NOT NULL,              -- Campaign identifier
+    cuenta VARCHAR(50) NOT NULL,                -- Account that made the payment
+    nro_documento VARCHAR(100) NOT NULL,        -- Payment document number
+    fecha_pago DATE NOT NULL,                   -- Payment date
+    monto_cancelado DECIMAL(15,2) NOT NULL,     -- Payment amount
+    
+    -- Deduplication logic fields
+    es_pago_unico BOOLEAN DEFAULT TRUE,         -- TRUE for first occurrence, FALSE for duplicates
+    fecha_primera_carga DATE NOT NULL,          -- First time this payment was loaded (from filename)
+    fecha_ultima_carga DATE NOT NULL,           -- Last time this payment was seen (from filename)
+    veces_visto INTEGER DEFAULT 1,              -- How many times this payment has been loaded
+    
+    -- Business attribution
+    esta_en_ventana BOOLEAN DEFAULT FALSE,      -- Payment is within campaign window
+    cod_luna VARCHAR(50),                       -- Client associated with this account (from asignaciones)
+    
+    -- Recovery calculation support
+    es_pago_valido BOOLEAN DEFAULT TRUE,        -- Passes business validation rules
+    motivo_rechazo TEXT,                        -- Reason if payment is rejected
+    
+    -- Metadata
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    
+    -- Composite primary key for payment uniqueness
+    PRIMARY KEY (archivo, nro_documento, fecha_pago, monto_cancelado)
+);
+
+-- Performance indexes
+CREATE INDEX idx_pago_dedup_archivo ON pago_deduplication(archivo);
+CREATE INDEX idx_pago_dedup_cuenta ON pago_deduplication(cuenta);
+CREATE INDEX idx_pago_dedup_fecha_pago ON pago_deduplication(fecha_pago);
+CREATE INDEX idx_pago_dedup_cod_luna ON pago_deduplication(cod_luna);
+CREATE INDEX idx_pago_dedup_unico ON pago_deduplication(es_pago_unico) WHERE es_pago_unico = TRUE;
+CREATE INDEX idx_pago_dedup_valido ON pago_deduplication(es_pago_valido) WHERE es_pago_valido = TRUE;
+CREATE INDEX idx_pago_dedup_ventana ON pago_deduplication(esta_en_ventana) WHERE esta_en_ventana = TRUE;
+
+-- Composite indexes for recovery calculation
+CREATE INDEX idx_pago_dedup_recovery ON pago_deduplication(archivo, es_pago_unico, es_pago_valido, esta_en_ventana);
+CREATE INDEX idx_pago_dedup_timeline ON pago_deduplication(archivo, fecha_pago, es_pago_unico);
+
+-- TimescaleDB hypertable for time-series performance (partitioned by payment date)
+SELECT create_hypertable('pago_deduplication', by_range('fecha_pago', INTERVAL '30 days'), if_not_exists => TRUE);
+
+-- Retention policy for payment data (keep 2 years)
+SELECT add_retention_policy('pago_deduplication', INTERVAL '2 years', if_not_exists => TRUE);
+
+-- Constraint to ensure positive payment amounts
+ALTER TABLE pago_deduplication ADD CONSTRAINT chk_pago_monto_positive CHECK (monto_cancelado > 0);
+
+-- Comments for documentation  
+COMMENT ON TABLE pago_deduplication IS 'Deduplicates payments across file reloads and tracks payment attribution to campaigns';
+COMMENT ON COLUMN pago_deduplication.archivo IS 'Campaign identifier linking to cuenta_campana_state';
+COMMENT ON COLUMN pago_deduplication.es_pago_unico IS 'TRUE only for the first occurrence of this payment (based on fecha_primera_carga)';
+COMMENT ON COLUMN pago_deduplication.esta_en_ventana IS 'TRUE if payment date falls within campaign apertura/cierre window';
+COMMENT ON COLUMN pago_deduplication.fecha_primera_carga IS 'Date from filename when this payment was first loaded (business date, not creado_el)';
+COMMENT ON COLUMN pago_deduplication.fecha_ultima_carga IS 'Date from filename when this payment was last seen (tracks reprocessing)';
+COMMENT ON COLUMN pago_deduplication.veces_visto IS 'Counter of how many times this payment has been reprocessed';
+COMMENT ON COLUMN pago_deduplication.cod_luna IS 'Client identifier derived from cuenta via asignaciones lookup';
+
+-- Create a partial unique index on the business key for unique payments
+CREATE UNIQUE INDEX idx_pago_dedup_business_key ON pago_deduplication(nro_documento, fecha_pago, monto_cancelado) 
+    WHERE es_pago_unico = TRUE;
+\n
+-- /home/reyer3/Projects/Pulso-Back/migrations/011-create-raw-calendario-table.sql --
+-- ========================================
+-- 011: Create raw_calendario table for BigQuery extraction staging
+-- TimescaleDB optimized version - PRIMARY KEY FIXED
+-- ========================================
+
+-- Raw staging table to store calendario data from BigQuery before transformation
+CREATE TABLE IF NOT EXISTS raw_calendario (
+    -- Primary identification
+    ARCHIVO TEXT NOT NULL,
+    
+    -- Campaign metadata
+    TIPO_CARTERA TEXT,
+    
+    -- Business dates (core for campaign logic)
+    fecha_apertura DATE NOT NULL,
+    fecha_trandeuda DATE,
+    fecha_cierre DATE,
+    FECHA_CIERRE_PLANIFICADA DATE,
+    
+    -- Campaign characteristics
+    DURACION_CAMPANA_DIAS_HABILES INTEGER,
+    ANNO_ASIGNACION INTEGER,
+    PERIODO_ASIGNACION TEXT,
+    ES_CARTERA_ABIERTA BOOLEAN,
+    RANGO_VENCIMIENTO TEXT,
+    ESTADO_CARTERA TEXT,
+    
+    -- Time partitioning fields (for TimescaleDB hypertable)
+    periodo_mes TEXT,
+    periodo_date DATE NOT NULL,
+    
+    -- Campaign classification
+    tipo_ciclo_campana TEXT,
+    categoria_duracion TEXT,
+    
+    -- ETL metadata
+    extraction_timestamp TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    
+    -- ✅ FIXED: Primary key includes partitioning column
+    PRIMARY KEY (ARCHIVO, periodo_date)
+);
+
+-- ========================================
+-- Convert to TimescaleDB hypertable for time-series optimization
+-- ========================================
+SELECT create_hypertable(
+    'raw_calendario', 
+    'periodo_date',
+    chunk_time_interval => INTERVAL '1 month',
+    if_not_exists => TRUE
+);
+
+-- ========================================
+-- Indexes for query performance (TimescaleDB optimized)
+-- ========================================
+CREATE INDEX IF NOT EXISTS idx_raw_calendario_fecha_apertura 
+    ON raw_calendario(fecha_apertura, periodo_date);
+
+CREATE INDEX IF NOT EXISTS idx_raw_calendario_tipo_cartera 
+    ON raw_calendario(TIPO_CARTERA, periodo_date);
+
+CREATE INDEX IF NOT EXISTS idx_raw_calendario_estado 
+    ON raw_calendario(ESTADO_CARTERA, periodo_date);
+
+CREATE INDEX IF NOT EXISTS idx_raw_calendario_archivo 
+    ON raw_calendario(ARCHIVO) INCLUDE (periodo_date);
+
+-- ========================================
+-- Update trigger for updated_at
+-- ========================================
+CREATE OR REPLACE FUNCTION update_raw_calendario_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = CURRENT_TIMESTAMP;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trigger_raw_calendario_updated_at ON raw_calendario;
+CREATE TRIGGER trigger_raw_calendario_updated_at
+    BEFORE UPDATE ON raw_calendario
+    FOR EACH ROW
+    EXECUTE FUNCTION update_raw_calendario_updated_at();
+
+-- ========================================
+-- Comments for documentation
+-- ========================================
+COMMENT ON TABLE raw_calendario IS 'Raw staging table for BigQuery calendario data with TimescaleDB optimization';
+COMMENT ON COLUMN raw_calendario.periodo_date IS 'Time dimension for hypertable partitioning';
+COMMENT ON COLUMN raw_calendario.ARCHIVO IS 'Campaign file identifier - part of composite primary key';
+\n
+-- /home/reyer3/Projects/Pulso-Back/migrations/012-create-raw-asignaciones-table.sql --
+-- ========================================
+-- 012: Create raw_asignaciones table for BigQuery extraction staging  
+-- TimescaleDB optimized version - PRIMARY KEY FIXED
+-- ========================================
+
+-- Raw staging table to store asignaciones data from BigQuery before transformation
+CREATE TABLE IF NOT EXISTS raw_asignaciones (
+    -- Primary identification (composite key)
+    cod_luna TEXT NOT NULL,
+    cuenta TEXT NOT NULL,
+    archivo TEXT NOT NULL,
+    
+    -- Client information  
+    cliente TEXT,
+    telefono TEXT,
+    
+    -- Business classification
+    tramo_gestion TEXT,
+    negocio TEXT,
+    dias_sin_trafico TEXT,
+    
+    -- Risk and behavior scoring
+    decil_contacto INTEGER,
+    decil_pago INTEGER,
+    
+    -- Account details
+    min_vto DATE,
+    zona TEXT,
+    rango_renta INTEGER,
+    campania_act TEXT,
+    
+    -- Payment arrangement details
+    fraccionamiento TEXT,
+    cuota_fracc_act TEXT,
+    fecha_corte DATE,
+    priorizado TEXT,
+    inscripcion TEXT,
+    incrementa_velocidad TEXT,
+    detalle_dscto_futuro TEXT,
+    cargo_fijo TEXT,
+    
+    -- Client identification
+    dni TEXT,
+    estado_pc TEXT,
+    tipo_linea TEXT,
+    cod_sistema INTEGER,
+    tipo_alta TEXT,
+    
+    -- Technical metadata
+    creado_el TIMESTAMPTZ,
+    fecha_asignacion DATE NOT NULL,  -- Derived from creado_el (for hypertable)
+    motivo_rechazo TEXT,
+    
+    -- ETL metadata
+    extraction_timestamp TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    
+    -- ✅ FIXED: Primary key includes partitioning column
+    PRIMARY KEY (cod_luna, cuenta, archivo, fecha_asignacion)
+);
+
+-- ========================================
+-- Convert to TimescaleDB hypertable for time-series optimization
+-- ========================================
+SELECT create_hypertable(
+    'raw_asignaciones', 
+    'fecha_asignacion',
+    chunk_time_interval => INTERVAL '1 month',
+    if_not_exists => TRUE
+);
+
+-- ========================================
+-- Performance indexes for common queries (TimescaleDB optimized)
+-- ========================================
+CREATE INDEX IF NOT EXISTS idx_raw_asignaciones_cod_luna 
+    ON raw_asignaciones(cod_luna, fecha_asignacion);
+
+CREATE INDEX IF NOT EXISTS idx_raw_asignaciones_cuenta 
+    ON raw_asignaciones(cuenta, fecha_asignacion);
+
+CREATE INDEX IF NOT EXISTS idx_raw_asignaciones_archivo 
+    ON raw_asignaciones(archivo) INCLUDE (fecha_asignacion);
+
+CREATE INDEX IF NOT EXISTS idx_raw_asignaciones_negocio 
+    ON raw_asignaciones(negocio, fecha_asignacion);
+
+CREATE INDEX IF NOT EXISTS idx_raw_asignaciones_tramo_gestion 
+    ON raw_asignaciones(tramo_gestion, fecha_asignacion);
+
+CREATE INDEX IF NOT EXISTS idx_raw_asignaciones_decil_contacto 
+    ON raw_asignaciones(decil_contacto, fecha_asignacion);
+
+CREATE INDEX IF NOT EXISTS idx_raw_asignaciones_creado_el 
+    ON raw_asignaciones(creado_el, fecha_asignacion);
+
+-- Composite index for business logic queries
+CREATE INDEX IF NOT EXISTS idx_raw_asignaciones_business_lookup
+    ON raw_asignaciones(cod_luna, negocio, tramo_gestion, fecha_asignacion);
+
+-- ========================================
+-- Update trigger for updated_at
+-- ========================================
+CREATE OR REPLACE FUNCTION update_raw_asignaciones_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = CURRENT_TIMESTAMP;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trigger_raw_asignaciones_updated_at ON raw_asignaciones;
+CREATE TRIGGER trigger_raw_asignaciones_updated_at
+    BEFORE UPDATE ON raw_asignaciones
+    FOR EACH ROW
+    EXECUTE FUNCTION update_raw_asignaciones_updated_at();
+
+-- ========================================
+-- Comments for documentation
+-- ========================================
+COMMENT ON TABLE raw_asignaciones IS 'Raw staging table for BigQuery asignaciones data with TimescaleDB optimization';
+COMMENT ON COLUMN raw_asignaciones.fecha_asignacion IS 'Time dimension for hypertable partitioning';
+COMMENT ON COLUMN raw_asignaciones.cod_luna IS 'Client identifier - core business key';
+COMMENT ON COLUMN raw_asignaciones.cuenta IS 'Account identifier - core business key';
+COMMENT ON COLUMN raw_asignaciones.archivo IS 'Campaign file identifier - links to calendario';
+\n
+-- /home/reyer3/Projects/Pulso-Back/migrations/013-create-raw-trandeuda-table.sql --
+-- ========================================
+-- 013: Create raw_trandeuda table for BigQuery extraction staging
+-- TimescaleDB optimized version - PRIMARY KEY FIXED
+-- ========================================
+
+-- Raw staging table to store trandeuda (debt transactions) data from BigQuery before transformation
+CREATE TABLE IF NOT EXISTS raw_trandeuda (
+    -- Account identification
+    cod_cuenta TEXT NOT NULL,
+    nro_documento TEXT NOT NULL,
+    archivo TEXT NOT NULL,
+    
+    -- Debt information
+    fecha_vencimiento DATE,
+    monto_exigible DECIMAL(15,2) NOT NULL,
+    
+    -- Technical metadata
+    creado_el TIMESTAMPTZ,
+    fecha_proceso DATE NOT NULL,  -- Derived from creado_el (for hypertable)
+    motivo_rechazo TEXT,
+    
+    -- ETL metadata
+    extraction_timestamp TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    
+    -- ✅ FIXED: Primary key includes partitioning column
+    PRIMARY KEY (cod_cuenta, nro_documento, archivo, fecha_proceso),
+    
+    -- Business constraint
+    CONSTRAINT chk_raw_trandeuda_monto_positive CHECK (monto_exigible >= 0)
+);
+
+-- ========================================
+-- Convert to TimescaleDB hypertable for time-series optimization
+-- ========================================
+SELECT create_hypertable(
+    'raw_trandeuda', 
+    'fecha_proceso',
+    chunk_time_interval => INTERVAL '1 month',
+    if_not_exists => TRUE
+);
+
+-- ========================================
+-- Performance indexes for common queries (TimescaleDB optimized)
+-- ========================================
+CREATE INDEX IF NOT EXISTS idx_raw_trandeuda_cod_cuenta 
+    ON raw_trandeuda(cod_cuenta, fecha_proceso);
+
+CREATE INDEX IF NOT EXISTS idx_raw_trandeuda_nro_documento 
+    ON raw_trandeuda(nro_documento, fecha_proceso);
+
+CREATE INDEX IF NOT EXISTS idx_raw_trandeuda_archivo 
+    ON raw_trandeuda(archivo) INCLUDE (fecha_proceso);
+
+CREATE INDEX IF NOT EXISTS idx_raw_trandeuda_fecha_vencimiento 
+    ON raw_trandeuda(fecha_vencimiento, fecha_proceso);
+
+CREATE INDEX IF NOT EXISTS idx_raw_trandeuda_monto_exigible 
+    ON raw_trandeuda(monto_exigible, fecha_proceso);
+
+CREATE INDEX IF NOT EXISTS idx_raw_trandeuda_creado_el 
+    ON raw_trandeuda(creado_el, fecha_proceso);
+
+-- Composite indexes for common business queries
+CREATE INDEX IF NOT EXISTS idx_raw_trandeuda_cuenta_fecha 
+    ON raw_trandeuda(cod_cuenta, fecha_proceso, monto_exigible);
+
+CREATE INDEX IF NOT EXISTS idx_raw_trandeuda_archivo_fecha 
+    ON raw_trandeuda(archivo, fecha_proceso, cod_cuenta);
+
+-- Index for debt aging analysis
+CREATE INDEX IF NOT EXISTS idx_raw_trandeuda_debt_aging
+    ON raw_trandeuda(cod_cuenta, fecha_vencimiento, fecha_proceso) 
+    INCLUDE (monto_exigible);
+
+-- ========================================
+-- Update trigger for updated_at
+-- ========================================
+CREATE OR REPLACE FUNCTION update_raw_trandeuda_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = CURRENT_TIMESTAMP;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trigger_raw_trandeuda_updated_at ON raw_trandeuda;
+CREATE TRIGGER trigger_raw_trandeuda_updated_at
+    BEFORE UPDATE ON raw_trandeuda
+    FOR EACH ROW
+    EXECUTE FUNCTION update_raw_trandeuda_updated_at();
+
+-- ========================================
+-- Comments for documentation
+-- ========================================
+COMMENT ON TABLE raw_trandeuda IS 'Raw staging table for BigQuery trandeuda (debt snapshots) data with TimescaleDB optimization';
+COMMENT ON COLUMN raw_trandeuda.fecha_proceso IS 'Time dimension for hypertable partitioning - derived from archivo date';
+COMMENT ON COLUMN raw_trandeuda.cod_cuenta IS 'Account identifier - links to asignaciones.cuenta';
+COMMENT ON COLUMN raw_trandeuda.monto_exigible IS 'Outstanding debt amount at fecha_proceso';
+COMMENT ON COLUMN raw_trandeuda.archivo IS 'Source file identifier with embedded date';
+\n
+-- /home/reyer3/Projects/Pulso-Back/migrations/014-create-raw-pagos-table.sql --
+-- ========================================
+-- 014: Create raw_pagos table for BigQuery extraction staging
+-- TimescaleDB optimized version
+-- ========================================
+
+-- Raw staging table to store pagos (payments) data from BigQuery before transformation
+CREATE TABLE IF NOT EXISTS raw_pagos (
+    -- Payment identification
+    nro_documento TEXT NOT NULL,
+    fecha_pago DATE NOT NULL,
+    monto_cancelado DECIMAL(15,2) NOT NULL,
+    
+    -- System identification  
+    cod_sistema TEXT,
+    archivo TEXT NOT NULL,
+    
+    -- Technical metadata
+    creado_el TIMESTAMPTZ,
+    motivo_rechazo TEXT,
+    
+    -- ETL metadata
+    extraction_timestamp TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    
+    -- Primary key constraint (for automatic deduplication)
+    PRIMARY KEY (nro_documento, fecha_pago, monto_cancelado),
+    
+    -- Business constraints
+    CONSTRAINT chk_raw_pagos_monto_positive CHECK (monto_cancelado > 0),
+    CONSTRAINT chk_raw_pagos_fecha_reasonable CHECK (
+        fecha_pago >= '2020-01-01' AND 
+        fecha_pago <= CURRENT_DATE + INTERVAL '30 days'
+    )
+);
+
+-- ========================================
+-- Convert to TimescaleDB hypertable for time-series optimization
+-- ========================================
+SELECT create_hypertable(
+    'raw_pagos', 
+    'fecha_pago',
+    chunk_time_interval => INTERVAL '1 month',
+    if_not_exists => TRUE
+);
+
+-- ========================================
+-- Performance indexes for common queries (TimescaleDB optimized)
+-- ========================================
+CREATE INDEX IF NOT EXISTS idx_raw_pagos_nro_documento 
+    ON raw_pagos(nro_documento, fecha_pago);
+
+CREATE INDEX IF NOT EXISTS idx_raw_pagos_archivo 
+    ON raw_pagos(archivo) INCLUDE (fecha_pago);
+
+CREATE INDEX IF NOT EXISTS idx_raw_pagos_cod_sistema 
+    ON raw_pagos(cod_sistema, fecha_pago);
+
+CREATE INDEX IF NOT EXISTS idx_raw_pagos_creado_el 
+    ON raw_pagos(creado_el, fecha_pago);
+
+-- Composite indexes for business queries
+CREATE INDEX IF NOT EXISTS idx_raw_pagos_documento_fecha 
+    ON raw_pagos(nro_documento, fecha_pago, monto_cancelado);
+
+CREATE INDEX IF NOT EXISTS idx_raw_pagos_fecha_monto 
+    ON raw_pagos(fecha_pago, monto_cancelado) INCLUDE (nro_documento);
+
+CREATE INDEX IF NOT EXISTS idx_raw_pagos_archivo_fecha 
+    ON raw_pagos(archivo, fecha_pago, nro_documento);
+
+-- Index for payment analytics and aggregations
+CREATE INDEX IF NOT EXISTS idx_raw_pagos_analytics
+    ON raw_pagos(fecha_pago, cod_sistema) 
+    INCLUDE (monto_cancelado, nro_documento);
+
+-- ========================================
+-- Update trigger for updated_at
+-- ========================================
+CREATE OR REPLACE FUNCTION update_raw_pagos_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = CURRENT_TIMESTAMP;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trigger_raw_pagos_updated_at ON raw_pagos;
+CREATE TRIGGER trigger_raw_pagos_updated_at
+    BEFORE UPDATE ON raw_pagos
+    FOR EACH ROW
+    EXECUTE FUNCTION update_raw_pagos_updated_at();
+
+-- ========================================
+-- Comments for documentation
+-- ========================================
+COMMENT ON TABLE raw_pagos IS 'Raw staging table for BigQuery pagos (payments) data with TimescaleDB optimization';
+COMMENT ON COLUMN raw_pagos.fecha_pago IS 'Time dimension for hypertable partitioning - payment date';
+COMMENT ON COLUMN raw_pagos.nro_documento IS 'Document/Account identifier - links to trandeuda';
+COMMENT ON COLUMN raw_pagos.monto_cancelado IS 'Payment amount - must be positive';
+COMMENT ON COLUMN raw_pagos.archivo IS 'Source file identifier - cumulative files need deduplication';
+COMMENT ON CONSTRAINT chk_raw_pagos_monto_positive ON raw_pagos IS 'Ensures payment amounts are positive';
+COMMENT ON CONSTRAINT chk_raw_pagos_fecha_reasonable ON raw_pagos IS 'Validates payment dates within reasonable range';
+\n
+-- /home/reyer3/Projects/Pulso-Back/migrations/015-create-gestiones-unificadas-table.sql --
+-- ========================================
+-- 015: Create gestiones_unificadas table for BigQuery extraction staging
+-- TimescaleDB optimized version
+-- ========================================
+
+-- Raw staging table to store unified gestiones data from BigQuery view before transformation
+CREATE TABLE IF NOT EXISTS gestiones_unificadas (
+    -- Core identification
+    cod_luna TEXT NOT NULL,
+    timestamp_gestion TIMESTAMPTZ NOT NULL,
+    fecha_gestion DATE NOT NULL,
+    
+    -- Channel information
+    canal_origen TEXT NOT NULL, -- 'BOT' or 'HUMANO'
+    
+    -- Original management data (before homologation)
+    management_original TEXT,
+    sub_management_original TEXT,
+    compromiso_original TEXT,
+    
+    -- Homologated classification (business ready)
+    nivel_1 TEXT,
+    nivel_2 TEXT,
+    contactabilidad TEXT,
+    
+    -- Business flags for KPI calculation
+    es_contacto_efectivo BOOLEAN DEFAULT FALSE,
+    es_contacto_no_efectivo BOOLEAN DEFAULT FALSE,
+    es_compromiso BOOLEAN DEFAULT FALSE,
+    
+    -- Weighting for business logic
+    peso_gestion INTEGER DEFAULT 1,
+    
+    -- ETL metadata
+    extraction_timestamp TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    
+    -- Primary key constraint
+    PRIMARY KEY (cod_luna, timestamp_gestion),
+    
+    -- Business constraints
+    CONSTRAINT chk_gestiones_unificadas_canal_origen 
+        CHECK (canal_origen IN ('BOT', 'HUMANO')),
+    CONSTRAINT chk_gestiones_unificadas_contactabilidad 
+        CHECK (contactabilidad IN ('Contacto Efectivo', 'Contacto No Efectivo', 'SIN_CLASIFICAR') OR contactabilidad IS NULL),
+    CONSTRAINT chk_gestiones_unificadas_peso_positive 
+        CHECK (peso_gestion > 0),
+    CONSTRAINT chk_gestiones_unificadas_fecha_consistency 
+        CHECK (fecha_gestion = DATE(timestamp_gestion)),
+    CONSTRAINT chk_gestiones_unificadas_contact_exclusive 
+        CHECK (NOT (es_contacto_efectivo = TRUE AND es_contacto_no_efectivo = TRUE))
+);
+
+-- ========================================
+-- Convert to TimescaleDB hypertable for time-series optimization
+-- ========================================
+SELECT create_hypertable(
+    'gestiones_unificadas', 
+    'timestamp_gestion',
+    chunk_time_interval => INTERVAL '1 month',
+    if_not_exists => TRUE
+);
+
+-- ========================================
+-- Performance indexes for common queries (TimescaleDB optimized)
+-- ========================================
+CREATE INDEX IF NOT EXISTS idx_gestiones_unificadas_cod_luna 
+    ON gestiones_unificadas(cod_luna, timestamp_gestion);
+
+CREATE INDEX IF NOT EXISTS idx_gestiones_unificadas_fecha_gestion 
+    ON gestiones_unificadas(fecha_gestion, timestamp_gestion);
+
+CREATE INDEX IF NOT EXISTS idx_gestiones_unificadas_canal_origen 
+    ON gestiones_unificadas(canal_origen, timestamp_gestion);
+
+CREATE INDEX IF NOT EXISTS idx_gestiones_unificadas_contactabilidad 
+    ON gestiones_unificadas(contactabilidad, timestamp_gestion);
+
+CREATE INDEX IF NOT EXISTS idx_gestiones_unificadas_nivel_1 
+    ON gestiones_unificadas(nivel_1, timestamp_gestion);
+
+-- Business logic indexes for KPI calculations
+CREATE INDEX IF NOT EXISTS idx_gestiones_unificadas_contacto_efectivo 
+    ON gestiones_unificadas(timestamp_gestion, cod_luna) 
+    WHERE es_contacto_efectivo = TRUE;
+
+CREATE INDEX IF NOT EXISTS idx_gestiones_unificadas_compromiso 
+    ON gestiones_unificadas(timestamp_gestion, cod_luna) 
+    WHERE es_compromiso = TRUE;
+
+-- Composite indexes for common business queries
+CREATE INDEX IF NOT EXISTS idx_gestiones_unificadas_luna_fecha 
+    ON gestiones_unificadas(cod_luna, fecha_gestion, timestamp_gestion);
+
+CREATE INDEX IF NOT EXISTS idx_gestiones_unificadas_fecha_canal 
+    ON gestiones_unificadas(fecha_gestion, canal_origen) 
+    INCLUDE (cod_luna, peso_gestion);
+
+CREATE INDEX IF NOT EXISTS idx_gestiones_unificadas_fecha_contactabilidad 
+    ON gestiones_unificadas(fecha_gestion, contactabilidad) 
+    INCLUDE (cod_luna, es_contacto_efectivo, es_compromiso);
+
+-- Analytics index for KPI calculations
+CREATE INDEX IF NOT EXISTS idx_gestiones_unificadas_kpi_analytics
+    ON gestiones_unificadas(fecha_gestion, cod_luna)
+    INCLUDE (es_contacto_efectivo, es_contacto_no_efectivo, es_compromiso, peso_gestion, canal_origen);
+
+-- ========================================
+-- Update trigger for updated_at
+-- ========================================
+CREATE OR REPLACE FUNCTION update_gestiones_unificadas_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = CURRENT_TIMESTAMP;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trigger_gestiones_unificadas_updated_at ON gestiones_unificadas;
+CREATE TRIGGER trigger_gestiones_unificadas_updated_at
+    BEFORE UPDATE ON gestiones_unificadas
+    FOR EACH ROW
+    EXECUTE FUNCTION update_gestiones_unificadas_updated_at();
+
+-- ========================================
+-- Comments for documentation
+-- ========================================
+COMMENT ON TABLE gestiones_unificadas IS 'Raw staging table for unified BigQuery gestiones (bot + human) data with TimescaleDB optimization';
+COMMENT ON COLUMN gestiones_unificadas.timestamp_gestion IS 'Time dimension for hypertable partitioning - exact gestion timestamp';
+COMMENT ON COLUMN gestiones_unificadas.cod_luna IS 'Client identifier - links to asignaciones';
+COMMENT ON COLUMN gestiones_unificadas.canal_origen IS 'Channel: BOT or HUMANO';
+COMMENT ON COLUMN gestiones_unificadas.contactabilidad IS 'Homologated contact result';
+COMMENT ON COLUMN gestiones_unificadas.es_contacto_efectivo IS 'Flag for PCT_CONTAC KPI calculation';
+COMMENT ON COLUMN gestiones_unificadas.es_compromiso IS 'Flag for PCT_EFECTIVIDAD KPI calculation';
+COMMENT ON COLUMN gestiones_unificadas.peso_gestion IS 'Weight for business logic calculations';
+\n
+-- /home/reyer3/Projects/Pulso-Back/migrations/016-create-raw-homologacion-mibotair-table.sql --
+-- 016: Create raw_homologacion_mibotair table
+-- Stores the homologation rules for human agent (MibotAir) interactions.
+CREATE TABLE IF NOT EXISTS raw_homologacion_mibotair (
+    management TEXT,
+    n_1 TEXT,
+    n_2 TEXT,
+    n_3 TEXT,
+    peso INTEGER, -- Asumiendo que se convertirá a numérico en el ETL
+    contactabilidad TEXT,
+    tipo_gestion TEXT,
+    codigo_rpta TEXT,
+    pdp TEXT,
+    gestor TEXT,
+    -- ETL metadata
+    extraction_timestamp TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    
+    -- Usamos una clave compuesta de los niveles de tipificación
+    PRIMARY KEY (n_1, n_2, n_3)
+);
+
+COMMENT ON TABLE raw_homologacion_mibotair IS 'Staging table for homologation rules from MibotAir (human agents).';
+\n
+-- /home/reyer3/Projects/Pulso-Back/migrations/017-create-raw-homologacion-voicebot-table.sql --
+-- 017: Create raw_homologacion_voicebot table
+-- Stores the homologation rules for Voicebot interactions.
+CREATE TABLE IF NOT EXISTS raw_homologacion_voicebot (
+    bot_management TEXT,
+    bot_sub_management TEXT,
+    bot_compromiso TEXT,
+    n1_homologado TEXT,
+    n2_homologado TEXT,
+    n3_homologado TEXT,
+    contactabilidad_homologada TEXT,
+    es_pdp_homologado BOOLEAN, -- Usaremos BOOLEAN para mayor claridad
+    peso_homologado INTEGER,
+    -- ETL metadata
+    extraction_timestamp TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+
+    -- Clave compuesta de las tipificaciones originales del bot
+    PRIMARY KEY (bot_management, bot_sub_management, bot_compromiso)
+);
+
+COMMENT ON TABLE raw_homologacion_voicebot IS 'Staging table for homologation rules from Voicebot interactions.';
+\n
+-- /home/reyer3/Projects/Pulso-Back/migrations/018-create-raw-ejecutivos-table.sql --
+-- 018: Create raw_ejecutivos table
+-- Stores agent/executive information, linking email to a document number.
+CREATE TABLE IF NOT EXISTS raw_ejecutivos (
+    correo_name TEXT PRIMARY KEY,
+    document TEXT NOT NULL,
+    nombre TEXT,
+    -- ETL metadata
+    extraction_timestamp TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
+
+COMMENT ON TABLE raw_ejecutivos IS 'Staging table for agent/executive data, mapping email to document ID.';
+\n

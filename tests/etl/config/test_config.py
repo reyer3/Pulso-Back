@@ -1,6 +1,6 @@
 import pytest
 from datetime import datetime
-from app.etl.config import ETLConfig, ExtractionConfig, TableType, ExtractionMode
+from etl.config import ETLConfig, ExtractionConfig, TableType, ExtractionMode
 
 # Mock PROJECT_UID directly in the class for consistent testing if not already set
 ETLConfig.PROJECT_UID = "P3fV4dWNeMkN5RJMhV8e"

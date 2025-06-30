@@ -1,7 +1,7 @@
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock
 from datetime import datetime, timezone
-from app.etl.loaders.postgres_loader import PostgresLoader, LoadResult
+from etl import PostgresLoader
 from app.services.postgres_service import PostgresService
 from app.models.database import Base, TABLE_MODEL_MAPPING
 from sqlalchemy import Column, Integer, String, DateTime

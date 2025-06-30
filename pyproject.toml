@@ -59,6 +59,7 @@ dependencies = [
     "isort>=5.12.0",
     "flake8>=6.1.0",
     "mypy>=1.7.1",
+    "dependency-injector>=4.48.1",
 ]
 
 # --- DEPENDENCIAS OPCIONALES (PARA DESARROLLO EXTENDIDO) ---
@@ -76,7 +77,7 @@ dev = "app.main:main"
 
 # --- SETUPTOOLS CONFIGURATION ---
 [tool.setuptools]
-packages = ["app"]
+packages = ["app", "etl", "shared"]
 
 # --- DEVELOPMENT TOOLS ---
 [tool.black]
