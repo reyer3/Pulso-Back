@@ -100,8 +100,8 @@ class ETLConfig:
         "asignaciones": ExtractionConfig(
             table_name="asignaciones",
             table_type=TableType.RAW,
-            description="Client account assignments to campaigns.",
-            primary_key=["cod_luna", "cuenta", "archivo"],
+            description="Client account assignments to campaigns (TimescaleDB hypertable).",
+            primary_key=["cod_luna", "cuenta", "archivo", "fecha_asignacion"],  # 🔧 FIXED: Added fecha_asignacion for hypertable
             incremental_column="creado_el",
             source_table="batch_P3fV4dWNeMkN5RJMhV8e_asignacion",
             batch_size=50000
