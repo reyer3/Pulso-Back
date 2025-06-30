@@ -19,8 +19,8 @@ from typing import List, Dict, Any, Optional, AsyncGenerator
 from dataclasses import dataclass
 import logging
 
-from app.database.connection import get_database_manager, DatabaseManager
-from app.core.logging import LoggerMixin
+from shared.database.connection import get_database_manager, DatabaseManager
+from shared.core.logging import LoggerMixin
 # Added imports for ETLConfig and TableType
 from etl.config import ETLConfig, TableType
 
@@ -133,7 +133,7 @@ class PostgresLoader(LoggerMixin):
         if fq_table_name_override:
             fq_table_name = fq_table_name_override
         else:
-            fq_table_name = ETLConfig.get_fq_table_name(table_name, table_type)
+            fq_table_name = ETLConfig.get_fq_table_name(table_name)
 
 
         if not data:
@@ -242,7 +242,7 @@ class PostgresLoader(LoggerMixin):
         if fq_table_name_override:
             fq_table_name = fq_table_name_override
         else:
-            fq_table_name = ETLConfig.get_fq_table_name(table_name, table_type)
+            fq_table_name = ETLConfig.get_fq_table_name(table_name)
 
         self.logger.debug(f"Starting streaming load for {fq_table_name}") # Log FQN
 
@@ -326,7 +326,7 @@ class PostgresLoader(LoggerMixin):
         if fq_table_name_override:
             fq_table_name = fq_table_name_override
         else:
-            fq_table_name = ETLConfig.get_fq_table_name(table_name, table_type)
+            fq_table_name = ETLConfig.get_fq_table_name(table_name)
 
         try:
             await db.execute_query(f"TRUNCATE TABLE {fq_table_name} RESTART IDENTITY")

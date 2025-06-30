@@ -12,7 +12,7 @@ from typing import Any, Dict
 import structlog
 from structlog.processors import JSONRenderer
 
-from app.core.config import settings
+from shared.core.config import settings
 
 
 def setup_logging() -> None:

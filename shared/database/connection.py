@@ -11,10 +11,10 @@ Features:
 
 import logging
 from typing import Optional, Dict, Any, List
-import asyncio
+
 import asyncpg
 
-from app.core.config import settings
+from shared.core.config import settings
 
 logger = logging.getLogger(__name__)
 

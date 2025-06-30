@@ -28,7 +28,7 @@ from datetime import datetime, date, timezone
 from typing import List, Dict, Any, Optional, Union
 import re
 
-from app.core.logging import LoggerMixin
+from shared.core.logging import LoggerMixin
 
 
 class RawDataTransformer(LoggerMixin):

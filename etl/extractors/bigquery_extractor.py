@@ -17,7 +17,7 @@ from google.auth import default
 from google.cloud import bigquery
 from google.cloud.exceptions import GoogleCloudError
 
-from app.core.logging import LoggerMixin
+from shared.core.logging import LoggerMixin
 from etl.config import ETLConfig, ExtractionMode
 from etl.watermarks import get_watermark_manager, WatermarkManager
 
