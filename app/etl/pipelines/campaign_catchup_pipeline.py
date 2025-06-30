@@ -2,7 +2,11 @@
 
 """
 🎯 Campaign Catch-Up Pipeline
-Orchestrates ETL for processing historical campaigns from raw data through to mart layers.
+Orchrates ETL for processing historical campaigns from raw data through to mart layers.
+
+SIMPLIFIED ARCHITECTURE:
+- Extract → RawDataTransformer → Load → MartBuilder
+- Eliminates complex unified transformers to prevent asyncio conflicts
 """
 
 from datetime import datetime, date, timedelta, timezone
@@ -11,14 +15,13 @@ from dataclasses import dataclass
 import asyncio
 
 from app.core.logging import LoggerMixin
-from app.etl.config import ETLConfig, TableType # Updated import
+from app.etl.config import ETLConfig, TableType
 from app.etl.extractors.bigquery_extractor import BigQueryExtractor
-# Assuming RawDataTransformer is the correct one, not UnifiedTransformerRegistry directly for raw transformation
-from app.etl.transformers.raw_data_transformer import RawDataTransformer
+from app.etl.transformers.raw_data_transformer import RawTransformerRegistry, get_raw_transformer_registry
 from app.etl.loaders.postgres_loader import PostgresLoader, LoadResult
 from app.etl.watermarks import get_watermark_manager, WatermarkManager
 from app.database.connection import get_database_manager, DatabaseManager
-from app.etl.builders.mart_builder import MartBuilder # New import
+from app.etl.builders.mart_builder import MartBuilder
 
 
 @dataclass
@@ -69,7 +72,7 @@ class CampaignWindow:
 
 
 @dataclass
-class CampaignPipelineResult: # Renamed from CampaignLoadResult for clarity
+class CampaignPipelineResult:
     archivo: str
     status: str # success, partial_success, failed
     raw_tables_loaded: Dict[str, int] # Records loaded per raw table
@@ -81,28 +84,30 @@ class CampaignPipelineResult: # Renamed from CampaignLoadResult for clarity
 
 class CampaignCatchUpPipeline(LoggerMixin):
     """
-    Pipeline for processing historical campaigns:
-    1. Loads all relevant raw data for a campaign window.
-    2. Triggers MartBuilder to build aux and mart layers for that campaign.
+    SIMPLIFIED Pipeline for processing historical campaigns:
+    1. Loads all relevant raw data for a campaign window using RawTransformerRegistry
+    2. Triggers MartBuilder to build aux and mart layers for that campaign
+    
+    ARCHITECTURE FIX: Uses only RawTransformerRegistry directly, no complex transformers
     """
 
     def __init__(
         self,
         extractor: BigQueryExtractor,
-        transformer: RawDataTransformer, # Specific transformer for raw data
+        raw_transformer: RawTransformerRegistry,  # SIMPLIFIED: Direct use of RawTransformerRegistry
         loader: PostgresLoader,
         mart_builder: MartBuilder,
         db_manager: DatabaseManager,
-        config: Type[ETLConfig], # Pass ETLConfig class itself
+        config: Type[ETLConfig],
         watermark_manager: WatermarkManager
     ):
         super().__init__()
         self.extractor = extractor
-        self.transformer = transformer
+        self.raw_transformer = raw_transformer  # SIMPLIFIED: Direct registry
         self.loader = loader
         self.mart_builder = mart_builder
         self.db_manager = db_manager
-        self.config_class = config # Store the class
+        self.config_class = config
         self.watermark_manager = watermark_manager
 
         self._cancel_event = asyncio.Event()
@@ -183,13 +188,11 @@ class CampaignCatchUpPipeline(LoggerMixin):
         errors: List[str] = []
 
         # Define raw tables to load for a campaign
-        # These are base names, ETLConfig.get_config will be used
         raw_tables_to_process = [
             "asignaciones", "trandeuda", "pagos",
             "voicebot_gestiones", "mibotair_gestiones",
             "homologacion_mibotair", "homologacion_voicebot", "ejecutivos"
         ]
-        # Calendario is assumed to be pre-loaded or loaded by a separate dimension pipeline.
 
         for table_base_name in raw_tables_to_process:
             if self._cancel_event.is_set():
@@ -239,7 +242,7 @@ class CampaignCatchUpPipeline(LoggerMixin):
         await self.watermark_manager.update_watermark(
             table_name=pipeline_watermark_name,
             timestamp=datetime.now(timezone.utc),
-            records_extracted=sum(raw_tables_loaded.values()), # Sum of records from all raw tables
+            records_extracted=sum(raw_tables_loaded.values()),
             extraction_duration_seconds=duration,
             status=final_status,
             error_message=", ".join(errors) or mart_build_error or None,
@@ -260,56 +263,38 @@ class CampaignCatchUpPipeline(LoggerMixin):
     async def _load_single_raw_table_for_campaign(
         self,
         campaign: CampaignWindow,
-        table_base_name: str, # Base name, e.g., "asignaciones"
+        table_base_name: str,
         force_refresh: bool = False
     ) -> int:
-        """Loads a single raw table for a specific campaign window."""
+        """Loads a single raw table for a specific campaign window using simplified transformer."""
         self.logger.debug(f"Loading raw table '{table_base_name}' for campaign '{campaign.archivo}'...")
         config = self.config_class.get_config(table_base_name)
+
+        # Skip calendario as it's handled separately
+        if table_base_name == "calendario":
+            self.logger.info("Skipping direct load of 'calendario' table within campaign pipeline run.")
+            return 0
 
         # Determine date range for query based on table type and campaign window
         start_date, end_date = self._get_date_range_for_table(campaign, table_base_name)
 
         # Build campaign-specific query
-        # The get_query method in ETLConfig needs to handle since_date properly.
-        # For campaign-specific loads, we might not use the watermark's since_date directly,
-        # but rather the campaign window's dates.
-        # The "incremental_filter" placeholder in templates will be replaced by campaign-specific date logic.
-
         query_template = self.config_class.get_query_template(table_base_name)
-
-        # This logic is simplified; real implementation might need more robust date handling
-        # for different tables (e.g. `creado_el` vs `fecha_gestion` vs `fecha_pago`)
-        incremental_column = config.incremental_column or "1=1" # Fallback if no incremental column
-        date_filter_column = incremental_column # Default to incremental_column for filtering
-
-        if table_base_name == "calendario": # Calendario is special
-            date_filter_column = "fecha_apertura" # Or how it's filtered
-            # This specific pipeline assumes calendario is already mostly up-to-date.
-            # A full load of calendario might be handled by a DimensionLoadPipeline.
-            # Here, we might just ensure the specific campaign's entry is present if needed.
-            # For simplicity, we'll assume it's extracted based on a general incremental logic.
-            # Or, this pipeline doesn't load "calendario" itself but consumes it.
-            # For now, this method won't load "calendario".
-            if table_base_name == "calendario":
-                 self.logger.info("Skipping direct load of 'calendario' table within campaign pipeline run.")
-                 return 0
-
+        incremental_column = config.incremental_column or "1=1"
+        date_filter_column = incremental_column
 
         # Construct the filter condition string
-        # This needs to be robust. The original _build_campaign_query had specific logic per table.
-        filter_condition = "1=1" # Default for full refresh tables
-        if config.default_mode != ExtractionMode.FULL_REFRESH and start_date and end_date and date_filter_column != "1=1":
-             filter_condition = f"DATE({date_filter_column}) BETWEEN '{start_date.strftime('%Y-%m-%d')}' AND '{end_date.strftime('%Y-%m-%d')}'"
-             if table_base_name == "asignaciones": # Special handling as in original coordinator
-                 filter_condition = f"(archivo = '{campaign.archivo}' OR {filter_condition})"
-             elif table_base_name == "trandeuda":
-                 base_archivo = campaign.archivo.split('_')[0] # Example: Cartera_Agencia_...
-                 filter_condition = f"(archivo LIKE '{base_archivo}%' AND {filter_condition})"
-
+        filter_condition = "1=1"  # Default for full refresh tables
+        if start_date and end_date and date_filter_column != "1=1":
+            filter_condition = f"DATE({date_filter_column}) BETWEEN '{start_date.strftime('%Y-%m-%d')}' AND '{end_date.strftime('%Y-%m-%d')}'"
+            if table_base_name == "asignaciones":
+                filter_condition = f"(archivo = '{campaign.archivo}' OR {filter_condition})"
+            elif table_base_name == "trandeuda":
+                base_archivo = campaign.archivo.split('_')[0]
+                filter_condition = f"(archivo LIKE '{base_archivo}%' AND {filter_condition})"
 
         # Format the query
-        if table_base_name in ["voicebot_gestiones", "mibotair_gestiones"]: # These need project_id, dataset_id
+        if table_base_name in ["voicebot_gestiones", "mibotair_gestiones"]:
             custom_query = query_template.format(
                 project_id=self.config_class.PROJECT_ID,
                 dataset_id=self.config_class.DATASET,
@@ -318,16 +303,17 @@ class CampaignCatchUpPipeline(LoggerMixin):
         else:
             custom_query = query_template.format(incremental_filter=filter_condition)
 
-        self.logger.debug(f"Query for {table_base_name} (Campaign: {campaign.archivo}):\n{custom_query}")
+        self.logger.debug(f"Query for {table_base_name} (Campaign: {campaign.archivo}):\\n{custom_query}")
 
+        # SIMPLIFIED: Direct stream processing
         raw_data_stream = self.extractor.stream_custom_query(custom_query, batch_size=config.batch_size)
-
-        # All raw tables are transformed by RawDataTransformer
-        transformed_data_stream = self.transformer.transform_stream(table_base_name, raw_data_stream)
+        
+        # SIMPLIFIED: Direct transformation using RawTransformerRegistry
+        transformed_data_stream = self._transform_data_stream(table_base_name, raw_data_stream)
 
         load_result = await self.loader.load_data_streaming(
             table_name=table_base_name,
-            table_type=config.table_type, # Pass the configured TableType
+            table_type=config.table_type,
             data_stream=transformed_data_stream,
             primary_key=config.primary_key,
             upsert=True
@@ -338,6 +324,18 @@ class CampaignCatchUpPipeline(LoggerMixin):
             return load_result.inserted_records
         else:
             raise Exception(f"Load failed for {table_base_name} in campaign '{campaign.archivo}': {load_result.error_message}")
+
+    async def _transform_data_stream(self, table_name: str, raw_data_stream):
+        """SIMPLIFIED: Transform data stream using RawTransformerRegistry directly"""
+        async for raw_batch in raw_data_stream:
+            if not raw_batch:
+                continue
+            
+            # SIMPLIFIED: Direct transformation
+            transformed_batch = self.raw_transformer.transform_raw_table_data(table_name, raw_batch)
+            
+            if transformed_batch:
+                yield transformed_batch
 
     def _get_date_range_for_table(self, campaign: CampaignWindow, table_base_name: str) -> tuple[Optional[date], Optional[date]]:
         """Determines the appropriate start and end date for querying a table for a given campaign."""
@@ -350,19 +348,17 @@ class CampaignCatchUpPipeline(LoggerMixin):
         elif table_base_name in ["voicebot_gestiones", "mibotair_gestiones"]:
             return campaign.gestiones_window_start, campaign.gestiones_window_end
         elif table_base_name in ["homologacion_mibotair", "homologacion_voicebot", "ejecutivos"]:
-            return None, None # These are typically full refresh, no specific campaign date range needed for query
-        # Add other table-specific date logic if needed
-        self.logger.warning(f"No specific date range logic for table '{table_base_name}', defaulting to full campaign span or no date filter.")
-        # Fallback to full campaign span if no specific logic, or None if not applicable
+            return None, None # These are typically full refresh
+        
+        self.logger.warning(f"No specific date range logic for table '{table_base_name}', defaulting to full campaign span.")
         return campaign.fecha_apertura, campaign.fecha_cierre or datetime.now(timezone.utc).date()
-
 
     async def run_all_pending_campaigns(
         self,
-        batch_size: int = 1, # Process one campaign at a time by default for stability
+        batch_size: int = 1,
         max_campaigns: Optional[int] = None,
-        force_refresh_all: bool = False, # Force re-processing of all raw data and mart build for fetched campaigns
-        force_refresh_raw_data_only: bool = False # Force re-load of raw data, but MartBuilder might skip if aux is fresh
+        force_refresh_all: bool = False,
+        force_refresh_raw_data_only: bool = False
     ) -> Dict[str, Any]:
         """
         Intelligently loads data for all pending campaigns.
@@ -382,7 +378,7 @@ class CampaignCatchUpPipeline(LoggerMixin):
 
             campaigns_to_run = await self.get_campaign_windows_to_process(
                 limit=max_campaigns,
-                force_refresh=force_refresh_all # force_refresh at this level means re-evaluate campaign for processing
+                force_refresh=force_refresh_all
             )
 
             if not campaigns_to_run:
@@ -411,9 +407,7 @@ class CampaignCatchUpPipeline(LoggerMixin):
                     if isinstance(res, CampaignPipelineResult):
                         summary_results.append(res)
                     elif isinstance(res, Exception):
-                        # This should ideally be handled within run_for_campaign to produce a CampaignPipelineResult
                         self.logger.error(f"Unhandled exception during campaign batch processing: {res}", exc_info=True)
-                        # Create a dummy error result if needed
                         summary_results.append(CampaignPipelineResult(
                             archivo="UNKNOWN_DUE_TO_ERROR", status="failed",
                             raw_tables_loaded={}, errors=[str(res)], duration_seconds=0
@@ -431,7 +425,7 @@ class CampaignCatchUpPipeline(LoggerMixin):
                 'status': final_status,
                 'force_refresh_all_used': force_refresh_all,
                 'force_refresh_raw_data_only_used': force_refresh_raw_data_only,
-                'total_campaign_windows_fetched': len(campaigns_to_run), # This is actually campaigns attempted
+                'total_campaign_windows_fetched': len(campaigns_to_run),
                 'campaigns_processed_count': len(summary_results),
                 'successful_campaigns': sum(1 for r in summary_results if r.status == 'success'),
                 'partial_success_campaigns': sum(1 for r in summary_results if r.status == 'partial_success'),
@@ -466,27 +460,29 @@ _campaign_catchup_pipeline: Optional[CampaignCatchUpPipeline] = None
 async def get_campaign_catchup_pipeline() -> CampaignCatchUpPipeline:
     """
     Gets the singleton CampaignCatchUpPipeline instance, initializing components if needed.
+    SIMPLIFIED: Uses only RawTransformerRegistry directly
     """
     global _campaign_catchup_pipeline
     if _campaign_catchup_pipeline is None:
-        # Initialize components first
+        # Initialize components
         db_manager = await get_database_manager()
         watermark_manager = await get_watermark_manager()
-        extractor = BigQueryExtractor() # Uses ETLConfig internally
-        # The transformer for raw data is RawDataTransformer
-        raw_transformer = RawDataTransformer() # Does not depend on other components for init
-        loader = PostgresLoader(db_manager=db_manager) # Needs db_manager
+        extractor = BigQueryExtractor()
+        
+        # SIMPLIFIED: Use RawTransformerRegistry directly
+        raw_transformer = get_raw_transformer_registry()
+        loader = PostgresLoader(db_manager=db_manager)
 
         # MartBuilder needs db_manager and project_uid from ETLConfig
         mart_builder = MartBuilder(db_manager=db_manager, project_uid=ETLConfig.PROJECT_UID)
 
         _campaign_catchup_pipeline = CampaignCatchUpPipeline(
             extractor=extractor,
-            transformer=raw_transformer, # Pass RawDataTransformer instance
+            raw_transformer=raw_transformer,  # SIMPLIFIED: Direct registry
             loader=loader,
             mart_builder=mart_builder,
             db_manager=db_manager,
-            config=ETLConfig, # Pass the class
+            config=ETLConfig,
             watermark_manager=watermark_manager
         )
     return _campaign_catchup_pipeline
