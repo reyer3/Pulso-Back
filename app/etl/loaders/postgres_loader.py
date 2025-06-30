@@ -21,6 +21,8 @@ import logging
 
 from app.database.connection import get_database_manager, DatabaseManager
 from app.core.logging import LoggerMixin
+# Added imports for ETLConfig and TableType
+from app.etl.config import ETLConfig, TableType
 
 logger = logging.getLogger(__name__)
 
@@ -91,11 +93,15 @@ class PostgresLoader(LoggerMixin):
 
     async def load_data_batch(
         self,
-        table_name: str,
+        table_name: str, # This will now be the base table name, e.g., "calendario"
+        table_type: TableType, # Added to determine schema
         data: List[Dict[str, Any]],
         primary_key: List[str],
         upsert: bool = True,
-        validate: bool = True
+        validate: bool = True,
+        # Optional parameter for special cases like test tables not in ETLConfig
+        # If fq_table_name is provided, table_type is ignored for FQN construction.
+        fq_table_name_override: Optional[str] = None
     ) -> LoadResult:
         """
         🚀 STREAMING FIX: Loads a batch using TRUE batch processing with executemany()
@@ -107,7 +113,7 @@ class PostgresLoader(LoggerMixin):
 
         if not data:
             return LoadResult(
-                table_name=table_name,
+                table_name=table_name, # table_name here is base_name, consider if FQN should be in LoadResult
                 total_records=0,
                 inserted_records=0,
                 updated_records=0,
@@ -123,9 +129,16 @@ class PostgresLoader(LoggerMixin):
         else:
             skipped_count = 0
 
+        # Determine the fully qualified table name
+        if fq_table_name_override:
+            fq_table_name = fq_table_name_override
+        else:
+            fq_table_name = ETLConfig.get_fq_table_name(table_name, table_type)
+
+
         if not data:
             return LoadResult(
-                table_name=table_name,
+                table_name=fq_table_name, # Using FQN in result
                 total_records=skipped_count,
                 inserted_records=0,
                 updated_records=0,
@@ -150,14 +163,16 @@ class PostgresLoader(LoggerMixin):
                 update_str = ", ".join(f'"{col}" = EXCLUDED."{col}"' for col in update_columns)
 
                 if upsert and update_columns:
+                    # Use fq_table_name in the query
                     query = f"""
-                        INSERT INTO {table_name} ({columns_str})
+                        INSERT INTO {fq_table_name} ({columns_str})
                         VALUES ({placeholders})
                         ON CONFLICT ({pk_str}) DO UPDATE SET {update_str}
                     """
                 else:
+                    # Use fq_table_name in the query
                     query = f"""
-                        INSERT INTO {table_name} ({columns_str})
+                        INSERT INTO {fq_table_name} ({columns_str})
                         VALUES ({placeholders})
                     """
 
@@ -175,10 +190,10 @@ class PostgresLoader(LoggerMixin):
                 inserted_count = len(batch_values)
                 duration = time.time() - start_time
                 
-                self.logger.info(f"✅ Loaded {inserted_count} records for {table_name}")
+                self.logger.info(f"✅ Loaded {inserted_count} records for {fq_table_name}") # Log FQN
 
                 return LoadResult(
-                    table_name=table_name,
+                    table_name=fq_table_name, # Use FQN in result
                     total_records=len(data) + skipped_count,
                     inserted_records=inserted_count,
                     updated_records=0,  # Simplified for performance
@@ -189,12 +204,12 @@ class PostgresLoader(LoggerMixin):
 
             except Exception as e:
                 duration = time.time() - start_time
-                error_msg = f"Failed to load batch into {table_name}: {e}"
+                error_msg = f"Failed to load batch into {fq_table_name}: {e}" # Log FQN
                 self.logger.error(error_msg)
                 self.logger.debug(f"Failed batch size: {len(data)} records")
                 
                 return LoadResult(
-                    table_name=table_name,
+                    table_name=fq_table_name, # Use FQN in result
                     total_records=len(data) + skipped_count,
                     inserted_records=0,
                     updated_records=0,
@@ -206,10 +221,13 @@ class PostgresLoader(LoggerMixin):
 
     async def load_data_streaming(
         self,
-        table_name: str,
+        table_name: str, # This will now be the base table name
+        table_type: TableType, # Added to determine schema
         data_stream: AsyncGenerator[List[Dict[str, Any]], None],
         primary_key: List[str],
-        upsert: bool = True
+        upsert: bool = True,
+        # Optional parameter for special cases like test tables not in ETLConfig
+        fq_table_name_override: Optional[str] = None
     ) -> LoadResult:
         """
         🚀 STREAMING FIX: Loads data from an async stream in efficient batches
@@ -220,7 +238,13 @@ class PostgresLoader(LoggerMixin):
         total_records, total_inserted, total_skipped = 0, 0, 0
         errors = []
 
-        self.logger.debug(f"Starting streaming load for {table_name}")
+        # Determine the fully qualified table name once
+        if fq_table_name_override:
+            fq_table_name = fq_table_name_override
+        else:
+            fq_table_name = ETLConfig.get_fq_table_name(table_name, table_type)
+
+        self.logger.debug(f"Starting streaming load for {fq_table_name}") # Log FQN
 
         try:
             async for batch in data_stream:
@@ -228,11 +252,14 @@ class PostgresLoader(LoggerMixin):
                     continue
 
                 # 🚀 STREAMING FIX: Each batch now uses efficient executemany()
+                # Pass base table_name and table_type, or the override
                 batch_result = await self.load_data_batch(
-                    table_name,
-                    batch,
-                    primary_key,
-                    upsert=upsert
+                    table_name=table_name, # base name
+                    table_type=table_type, # type
+                    data=batch,
+                    primary_key=primary_key,
+                    upsert=upsert,
+                    fq_table_name_override=fq_table_name_override # Pass override if present
                 )
 
                 total_records += batch_result.total_records
@@ -249,7 +276,7 @@ class PostgresLoader(LoggerMixin):
 
             # 🎯 This is what gets returned to _load_campaign_table()
             final_result = LoadResult(
-                table_name=table_name,
+                table_name=fq_table_name, # Use FQN in result
                 total_records=total_records,
                 inserted_records=total_inserted,
                 updated_records=0,
@@ -272,7 +299,7 @@ class PostgresLoader(LoggerMixin):
             self.logger.error(error_msg, exc_info=True)
             
             return LoadResult(
-                table_name=table_name,
+                table_name=fq_table_name, # Use FQN in result
                 total_records=total_records,
                 inserted_records=total_inserted,
                 updated_records=0,
@@ -284,9 +311,11 @@ class PostgresLoader(LoggerMixin):
 
     async def truncate_and_load(
         self,
-        table_name: str,
+        table_name: str, # Base table name
+        table_type: TableType, # Added
         data: List[Dict[str, Any]],
-        primary_key: List[str]
+        primary_key: List[str],
+        fq_table_name_override: Optional[str] = None
     ) -> LoadResult:
         """
         Truncates a table and then loads new data.
@@ -294,15 +323,22 @@ class PostgresLoader(LoggerMixin):
         start_time = time.time()
         db = await self._get_db_manager()
 
+        if fq_table_name_override:
+            fq_table_name = fq_table_name_override
+        else:
+            fq_table_name = ETLConfig.get_fq_table_name(table_name, table_type)
+
         try:
-            await db.execute_query(f"TRUNCATE TABLE {table_name} RESTART IDENTITY")
-            self.logger.info(f"Truncated table: {table_name}")
+            await db.execute_query(f"TRUNCATE TABLE {fq_table_name} RESTART IDENTITY")
+            self.logger.info(f"Truncated table: {fq_table_name}")
 
             load_result = await self.load_data_batch(
-                table_name,
-                data,
-                primary_key,
-                upsert=False
+                table_name=table_name, # base name
+                table_type=table_type, # type
+                data=data,
+                primary_key=primary_key,
+                upsert=False, # Always False for truncate and load
+                fq_table_name_override=fq_table_name_override
             )
 
             load_result.load_duration_seconds = time.time() - start_time
@@ -310,10 +346,10 @@ class PostgresLoader(LoggerMixin):
 
         except Exception as e:
             duration = time.time() - start_time
-            error_msg = f"Failed truncate and load for {table_name}: {e}"
+            error_msg = f"Failed truncate and load for {fq_table_name}: {e}" # Log FQN
             self.logger.error(error_msg)
             return LoadResult(
-                table_name=table_name,
+                table_name=fq_table_name, # Use FQN in result
                 total_records=len(data),
                 inserted_records=0,
                 updated_records=0,

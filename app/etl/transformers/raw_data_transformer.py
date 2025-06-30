@@ -355,9 +355,110 @@ class RawDataTransformer(LoggerMixin):
 
         return transformed_records
 
-    def transform_gestiones_unificadas(self, raw_data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    # transform_gestiones_unificadas is REMOVED
+
+    def transform_voicebot_gestiones(self, raw_data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
-        🛠️ CRITICAL FIX: Transform BigQuery unified gestiones to PostgreSQL gestiones_unificadas
+        Transforms raw Voicebot gestiones data for PostgreSQL.
+        Focuses on basic type cleaning. Homologation is done in MartBuilder.
+        Corresponds to table: raw_P3fV4dWNeMkN5RJMhV8e.voicebot_gestiones
+        """
+        transformed_records = []
+        for i, record in enumerate(raw_data):
+            try:
+                self.transformation_stats['records_processed'] += 1
+
+                uid = self._safe_string(record.get('uid'))
+                if not uid:
+                    self.logger.warning(f"⚠️ Skipping voicebot_gestiones record {i}: missing uid")
+                    self.transformation_stats['records_skipped'] += 1
+                    continue
+
+                transformed = {
+                    'uid': uid,
+                    'campaign_id': self._safe_string(record.get('campaign_id')),
+                    'campaign_name': self._safe_string(record.get('campaign_name')),
+                    'document': self._safe_string(record.get('document')),
+                    'phone': self._safe_decimal(record.get('phone')), # Assuming phone might be numeric
+                    'date': self._safe_datetime(record.get('date')), # BigQuery 'date' field for this table is a timestamp
+                    'management': self._safe_string(record.get('management')),
+                    'sub_management': self._safe_string(record.get('sub_management')),
+                    'weight': self._safe_int(record.get('weight')),
+                    'origin': self._safe_string(record.get('origin')),
+                    'fecha_compromiso': self._safe_datetime(record.get('fecha_compromiso')),
+                    'compromiso': self._safe_string(record.get('compromiso')),
+                    'observacion': self._safe_string(record.get('observacion')),
+                    'project': self._safe_string(record.get('project')),
+                    'client': self._safe_string(record.get('client')),
+                    'duracion': self._safe_int(record.get('duracion')),
+                    'id_telephony': self._safe_string(record.get('id_telephony')),
+                    'url_record_bot': self._safe_string(record.get('url_record_bot')),
+                    'extraction_timestamp': self._safe_datetime(record.get('extraction_timestamp')) or datetime.now(timezone.utc),
+                    # created_at and updated_at will be handled by DB defaults or triggers
+                }
+                transformed_records.append(transformed)
+                self.transformation_stats['records_transformed'] += 1
+            except Exception as e:
+                self.logger.error(f"Error transforming voicebot_gestiones record {i}: {str(e)}")
+                self.transformation_stats['validation_errors'] += 1
+                continue
+        return transformed_records
+
+    def transform_mibotair_gestiones(self, raw_data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Transforms raw MibotAir gestiones data for PostgreSQL.
+        Focuses on basic type cleaning. Homologation is done in MartBuilder.
+        Corresponds to table: raw_P3fV4dWNeMkN5RJMhV8e.mibotair_gestiones
+        """
+        transformed_records = []
+        for i, record in enumerate(raw_data):
+            try:
+                self.transformation_stats['records_processed'] += 1
+
+                uid = self._safe_string(record.get('uid'))
+                if not uid:
+                    self.logger.warning(f"⚠️ Skipping mibotair_gestiones record {i}: missing uid")
+                    self.transformation_stats['records_skipped'] += 1
+                    continue
+
+                transformed = {
+                    'uid': uid,
+                    'campaign_id': self._safe_string(record.get('campaign_id')),
+                    'campaign_name': self._safe_string(record.get('campaign_name')),
+                    'document': self._safe_string(record.get('document')),
+                    'phone': self._safe_decimal(record.get('phone')), # Assuming phone might be numeric
+                    'date': self._safe_datetime(record.get('date')), # BigQuery 'date' field is a timestamp
+                    'management': self._safe_string(record.get('management')),
+                    'sub_management': self._safe_string(record.get('sub_management')),
+                    'weight': self._safe_int(record.get('weight')),
+                    'origin': self._safe_string(record.get('origin')),
+                    'n1': self._safe_string(record.get('n1')),
+                    'n2': self._safe_string(record.get('n2')),
+                    'n3': self._safe_string(record.get('n3')),
+                    'observacion': self._safe_string(record.get('observacion')),
+                    'extra': self._safe_string(record.get('extra')), # Keep as string, MartBuilder might parse JSON
+                    'project': self._safe_string(record.get('project')),
+                    'client': self._safe_string(record.get('client')),
+                    'nombre_agente': self._safe_string(record.get('nombre_agente')),
+                    'correo_agente': self._safe_string(record.get('correo_agente')),
+                    'duracion': self._safe_int(record.get('duracion')),
+                    'monto_compromiso': self._safe_decimal(record.get('monto_compromiso')),
+                    'fecha_compromiso': self._safe_date(record.get('fecha_compromiso')),
+                    'url': self._safe_string(record.get('url')),
+                    'extraction_timestamp': self._safe_datetime(record.get('extraction_timestamp')) or datetime.now(timezone.utc),
+                    # created_at and updated_at will be handled by DB defaults or triggers
+                }
+                transformed_records.append(transformed)
+                self.transformation_stats['records_transformed'] += 1
+            except Exception as e:
+                self.logger.error(f"Error transforming mibotair_gestiones record {i}: {str(e)}")
+                self.transformation_stats['validation_errors'] += 1
+                continue
+        return transformed_records
+
+    def _map_contactabilidad_to_valid_value(self, raw_contactabilidad: Optional[str]) -> Optional[str]:
+        """
+        🛠️ CRITICAL FIX: Map inconsistent BigQuery contactabilidad values to valid PostgreSQL CHECK constraint values
         
         FIXED: CHECK constraint violations by mapping inconsistent BigQuery values to valid PostgreSQL values
         
@@ -785,20 +886,33 @@ class RawTransformerRegistry:
 
         # Map raw table names to transformation methods
         self.raw_transformer_mapping = {
-            'raw_calendario': self.transformer.transform_raw_calendario,  # Fixed: removed lambda wrapper
-            'raw_asignaciones': self.transformer.transform_raw_asignaciones,
-            'raw_trandeuda': self.transformer.transform_raw_trandeuda,
-            'raw_pagos': self.transformer.transform_raw_pagos,
-            'gestiones_unificadas': self.transformer.transform_gestiones_unificadas,
-            "raw_homologacion_mibotair": self.transformer.transform_raw_homologacion_mibotair,
-            "raw_homologacion_voicebot": self.transformer.transform_raw_homologacion_voicebot,
-            "raw_ejecutivos": self.transformer.transform_raw_ejecutivos,
+            # Keys updated to base names
+            'calendario': self.transformer.transform_raw_calendario,
+            'asignaciones': self.transformer.transform_raw_asignaciones,
+            'trandeuda': self.transformer.transform_raw_trandeuda,
+            'pagos': self.transformer.transform_raw_pagos,
+            # 'gestiones_unificadas' removed
+            "homologacion_mibotair": self.transformer.transform_raw_homologacion_mibotair,
+            "homologacion_voicebot": self.transformer.transform_raw_homologacion_voicebot,
+            "ejecutivos": self.transformer.transform_raw_ejecutivos,
+            # New transformers for voicebot and mibotair gestiones
+            "voicebot_gestiones": self.transformer.transform_voicebot_gestiones,
+            "mibotair_gestiones": self.transformer.transform_mibotair_gestiones,
         }
 
     def transform_raw_table_data(self, table_name: str, raw_data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Transform data for a specific raw table"""
+        """Transform data for a specific raw table (expects base table name)"""
         if table_name not in self.raw_transformer_mapping:
-            raise ValueError(f"No raw transformer found for table: {table_name}")
+            # Attempt to match with "raw_" prefix for backward compatibility or direct calls
+            # This might occur if some part of the system still uses "raw_tablename"
+            # However, ETLConfig now uses base names, so this path should ideally not be hit often.
+            # For the new architecture, table_name should be the base name.
+            self.transformer.logger.warning(f"Transformer lookup for '{table_name}' failed. Trying without 'raw_' prefix if present.")
+            base_name_attempt = table_name.replace("raw_", "")
+            if base_name_attempt in self.raw_transformer_mapping:
+                 transformer_func = self.raw_transformer_mapping[base_name_attempt]
+                 return transformer_func(raw_data)
+            raise ValueError(f"No raw transformer found for table: {table_name} (or base name {base_name_attempt})")
 
         transformer_func = self.raw_transformer_mapping[table_name]
         return transformer_func(raw_data)

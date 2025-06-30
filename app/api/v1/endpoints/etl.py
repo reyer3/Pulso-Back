@@ -666,7 +666,9 @@ class ETLAPI(LoggerMixin):
 # =============================================================================
 # BACKGROUND TASK FUNCTIONS
 # =============================================================================
-from app.etl.coordinators.calendar_driven_coordinator import get_calendar_coordinator
+# Updated import for the new CampaignCatchUpPipeline
+from app.etl.pipelines.campaign_catchup_pipeline import get_campaign_catchup_pipeline
+
 async def _execute_dashboard_refresh(
     force: bool = False, 
     tables: Optional[List[str]] = None,
@@ -734,17 +736,17 @@ async def _execute_campaign_catch_up(
     """Background task for calendar-driven campaign catch-up."""
     print("🚀 Starting intelligent campaign catch-up...")
     try:
-        # 1. Obtener la instancia del coordinador (usando el patrón singleton)
-        coordinator = get_calendar_coordinator()
+        # 1. Get the pipeline instance
+        pipeline = await get_campaign_catchup_pipeline() # Use the new getter
 
-        # 2. Ejecutar la lógica principal
-        summary = await coordinator.catch_up_all_campaigns(
-            force_refresh=force_refresh,
+        # 2. Execute the main logic
+        summary = await pipeline.run_all_pending_campaigns( # Call the new method
+            force_refresh_all=force_refresh, # Parameter name might change
             batch_size=batch_size,
             max_campaigns=max_campaigns
         )
 
-        # 3. Registrar el resultado (en los logs de la aplicación)
+        # 3. Log the result
         print(f"✅ Campaign catch-up completed. Status: {summary.get('status')}")
         print(f"📊 Summary: {summary}")
 
@@ -757,8 +759,8 @@ async def cancel_campaign_catch_up():
     🛑 Signals the running campaign catch-up process to stop gracefully.
     The process will finish its current batch and then exit.
     """
-    coordinator = get_calendar_coordinator()
-    coordinator.cancel()
+    pipeline = await get_campaign_catchup_pipeline() # Use the new getter
+    pipeline.cancel_processing() # Call the new cancel method
     return {"message": "Cancellation signal sent. Process will stop after the current batch."}
 
 # =============================================================================
