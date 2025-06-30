@@ -1,5 +1,5 @@
 -- 002: Create project-specific schemas
--- depends: 001-create-etl-metadata-tables.sql
+-- depends: 001-create-etl-metadata-tables
 
 CREATE SCHEMA IF NOT EXISTS raw_P3fV4dWNeMkN5RJMhV8e;
 COMMENT ON SCHEMA raw_P3fV4dWNeMkN5RJMhV8e IS 'Raw staging data for project P3fV4dWNeMkN5RJMhV8e.';
