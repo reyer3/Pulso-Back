@@ -41,7 +41,10 @@ async def get_campaign_from_postgres(archivo: str) -> CampaignWindow:
         # Usar la base de datos ya conectada
         db = etl_dependencies._db_manager
         
-        # Query desde la tabla calendario en PostgreSQL
+        # Primero, verificar la estructura de la tabla
+        logger.debug(f"🔍 Looking for campaign: {archivo}")
+        
+        # Query más robusta con manejo de errores
         query = """
         SELECT 
             archivo,
@@ -57,16 +60,64 @@ async def get_campaign_from_postgres(archivo: str) -> CampaignWindow:
         result = await db.execute_query(query, archivo)
         
         if not result:
+            # Intentar búsqueda parcial si no encuentra exacto
+            logger.warning(f"⚠️ Exact campaign '{archivo}' not found, trying partial match...")
+            
+            partial_query = """
+            SELECT 
+                archivo,
+                fecha_apertura,
+                fecha_cierre,
+                tipo_cartera,
+                estado_cartera
+            FROM raw_P3fV4dWNeMkN5RJMhV8e.calendario
+            WHERE archivo ILIKE $1
+            LIMIT 5
+            """
+            
+            partial_result = await db.execute_query(partial_query, f"%{archivo[:20]}%")
+            
+            if partial_result:
+                logger.info("📋 Similar campaigns found:")
+                for i, row in enumerate(partial_result):
+                    if isinstance(row, dict):
+                        logger.info(f"  {i+1}. {row.get('archivo', row)}")
+                    else:
+                        logger.info(f"  {i+1}. {row[0] if len(row) > 0 else row}")
+                        
             raise ValueError(f"Campaign '{archivo}' not found in PostgreSQL calendario table")
         
-        # 🔧 FIX: Obtener row correctamente dependiendo del tipo de resultado
+        # 🔧 IMPROVED: Manejo más robusto de resultados
+        logger.debug(f"Raw result type: {type(result[0])}")
+        logger.debug(f"Raw result: {result[0]}")
+        
         if isinstance(result[0], dict):
             # Si result es lista de diccionarios
             row = result[0]
         else:
-            # Si result es lista de tuplas, convertir a diccionario
-            columns = ['archivo', 'fecha_apertura', 'fecha_cierre', 'tipo_cartera', 'estado_cartera']
-            row = dict(zip(columns, result[0]))
+            # Si result es lista de tuplas, necesitamos obtener las columnas correctas
+            row_data = result[0]
+            logger.debug(f"Tuple length: {len(row_data)}")
+            logger.debug(f"Tuple content: {row_data}")
+            
+            # Mapear por posición (más seguro que asumir nombres)
+            try:
+                row = {
+                    'archivo': row_data[0],
+                    'fecha_apertura': row_data[1],
+                    'fecha_cierre': row_data[2] if len(row_data) > 2 else None,
+                    'tipo_cartera': row_data[3] if len(row_data) > 3 else 'UNKNOWN',
+                    'estado_cartera': row_data[4] if len(row_data) > 4 else 'UNKNOWN'
+                }
+            except IndexError as e:
+                logger.error(f"❌ Error mapping tuple to dict: {e}")
+                logger.error(f"Available data: {row_data}")
+                raise ValueError(f"Invalid database result structure: {e}")
+        
+        # Validar que tenemos los campos requeridos
+        if 'archivo' not in row or 'fecha_apertura' not in row:
+            logger.error(f"❌ Missing required fields in row: {row}")
+            raise ValueError(f"Database result missing required fields: {list(row.keys())}")
         
         # Convertir fechas si es necesario
         fecha_apertura = row['fecha_apertura']
@@ -93,6 +144,28 @@ async def get_campaign_from_postgres(archivo: str) -> CampaignWindow:
         return campaign
         
     except Exception as e:
+        # Más información de debug en caso de error
+        logger.error(f"❌ Error getting campaign info: {str(e)}")
+        logger.error(f"Original archivo parameter: '{archivo}'")
+        
+        # Intentar mostrar algunas campañas disponibles para debug
+        try:
+            debug_query = """
+            SELECT archivo, fecha_apertura 
+            FROM raw_P3fV4dWNeMkN5RJMhV8e.calendario 
+            ORDER BY fecha_apertura DESC 
+            LIMIT 5
+            """
+            debug_result = await db.execute_query(debug_query)
+            logger.info("📋 Recent campaigns in database:")
+            for row in debug_result:
+                if isinstance(row, dict):
+                    logger.info(f"  • {row.get('archivo', 'N/A')} - {row.get('fecha_apertura', 'N/A')}")
+                else:
+                    logger.info(f"  • {row[0]} - {row[1]}")
+        except Exception as debug_e:
+            logger.error(f"❌ Could not retrieve debug info: {debug_e}")
+        
         raise Exception(f"Failed to get campaign info for '{archivo}': {str(e)}")
 
 
@@ -352,6 +425,10 @@ async def main():
     validate_parser = subparsers.add_parser('validate', help='Validate all layers')
     validate_parser.add_argument('--campaign', required=True, help='Campaign archivo name')
     
+    # 🆕 NUEVO: Comando para listar campañas disponibles
+    list_parser = subparsers.add_parser('list-campaigns', help='List available campaigns')
+    list_parser.add_argument('--recent', type=int, default=10, help='Number of recent campaigns to show')
+    
     args = parser.parse_args()
     
     if not args.command:
@@ -363,20 +440,53 @@ async def main():
     logger.info("🎯 AUX & MART PIPELINE CLI")
     logger.info("=" * 60)
     logger.info(f"Command: {args.command}")
-    logger.info(f"Campaign: {args.campaign}")
+    if hasattr(args, 'campaign'):
+        logger.info(f"Campaign: {args.campaign}")
     logger.info(f"Start time: {start_time}")
     logger.info("=" * 60)
     
     success = False
     
     try:
-        # Inicializar recursos
+        # Inicializar recursos para todos los comandos excepto help
         logger.info("🔧 Initializing ETL resources...")
         await etl_dependencies.init_resources()
         logger.info("✅ Dependencies initialized")
         
-        # Ejecutar comando
-        if args.command == 'aux-only':
+        # 🆕 NUEVO: Comando para listar campañas
+        if args.command == 'list-campaigns':
+            try:
+                db = etl_dependencies._db_manager
+                query = """
+                SELECT archivo, fecha_apertura, fecha_cierre
+                FROM raw_P3fV4dWNeMkN5RJMhV8e.calendario 
+                ORDER BY fecha_apertura DESC 
+                LIMIT $1
+                """
+                result = await db.execute_query(query, args.recent)
+                
+                logger.info(f"📋 Most recent {args.recent} campaigns:")
+                logger.info("-" * 80)
+                for i, row in enumerate(result, 1):
+                    if isinstance(row, dict):
+                        archivo = row['archivo']
+                        fecha_apertura = row['fecha_apertura']
+                        fecha_cierre = row.get('fecha_cierre', 'N/A')
+                    else:
+                        archivo = row[0]
+                        fecha_apertura = row[1]
+                        fecha_cierre = row[2] if len(row) > 2 and row[2] else 'N/A'
+                    
+                    logger.info(f"{i:2d}. {archivo}")
+                    logger.info(f"    📅 {fecha_apertura} → {fecha_cierre}")
+                
+                success = True
+            except Exception as e:
+                logger.error(f"❌ Error listing campaigns: {e}")
+                success = False
+        
+        # Ejecutar comandos existentes
+        elif args.command == 'aux-only':
             success = await cmd_aux_only(args)
         elif args.command == 'mart-only':
             success = await cmd_mart_only(args)
@@ -408,7 +518,8 @@ async def main():
     logger.info("=" * 60)
     logger.info(f"🏁 EXECUTION {status}")
     logger.info(f"Command: {args.command}")
-    logger.info(f"Campaign: {args.campaign}")
+    if hasattr(args, 'campaign'):
+        logger.info(f"Campaign: {args.campaign}")
     logger.info(f"Duration: {duration:.2f}s ({duration/60:.1f} minutes)")
     logger.info("=" * 60)
     
