@@ -1,9 +1,12 @@
-# etl/run_pipeline.py - TEMPORAL FIX
+# etl/run_pipeline.py - ENHANCED WITH DIRECT DATE FILTERING
 
 """
-🚀 ETL Pipeline Runner - Con fallback temporal
+🚀 ETL Pipeline Runner - Con fallback temporal + filtrado directo por creado_el
 
-TEMPORAL FIX: Usa el pipeline existente si el híbrido no está disponible
+NUEVOS MODOS:
+- catchup-direct: Filtrado directo por creado_el (sin campañas)
+- catchup-calendar: Filtrado basado en campañas (existente)
+- catchup-incremental: Filtrado basado en watermarks (existente)
 """
 
 import asyncio
@@ -87,6 +90,97 @@ async def get_campaigns_in_date_range(start_date: date, end_date: date) -> List[
 
     logger.info(f"📅 Found {len(campaigns)} campaigns in date range")
     return campaigns
+
+
+async def run_direct_date_filter(args) -> bool:
+    """
+    🎯 NUEVO: Ejecuta extracción con filtrado directo por creado_el.
+    
+    Ignora completamente las campañas y filtra directamente por la columna creado_el
+    de cada tabla, proporcionando control total sobre el rango de fechas.
+    """
+    try:
+        logger.info("🎯 Starting direct date-based extraction...")
+
+        if not args.from_date or not args.to_date:
+            logger.error("❌ Direct extraction requires --from-date and --to-date")
+            return False
+
+        if not HYBRID_AVAILABLE:
+            logger.error("❌ Direct extraction requires hybrid pipeline (not available)")
+            return False
+
+        start_time = datetime.now()
+        
+        # Crear una campaña sintética para el contexto
+        synthetic_campaign = CampaignWindow(
+            archivo=f"DIRECT_EXTRACTION_{args.from_date.strftime('%Y%m%d')}_{args.to_date.strftime('%Y%m%d')}",
+            fecha_apertura=args.from_date,
+            fecha_cierre=args.to_date,
+            tipo_cartera="DIRECT",
+            estado_cartera="SYNTHETIC"
+        )
+
+        hybrid_pipeline = await etl_dependencies.hybrid_raw_pipeline()
+
+        # Determinar tablas a procesar
+        tables_to_process = args.tables if hasattr(args, 'tables') and args.tables else ETLConfig.get_raw_source_tables()
+        
+        logger.info(f"📊 Processing {len(tables_to_process)} tables with direct date filter")
+        logger.info(f"📅 Date range: {args.from_date} to {args.to_date}")
+        logger.info(f"📋 Tables: {', '.join(tables_to_process)}")
+
+        total_records = 0
+        successful_tables = 0
+        failed_tables = []
+
+        # Procesar cada tabla individualmente con filtrado directo
+        for i, table_name in enumerate(tables_to_process, 1):
+            logger.info(f"🔄 Processing table {i}/{len(tables_to_process)}: {table_name}")
+            
+            try:
+                # Usar el método de extracción directa
+                result = await hybrid_pipeline._etl_table_stream_direct_dates(
+                    table_name=table_name,
+                    start_date=args.from_date,
+                    end_date=args.to_date,
+                    campaign_context=synthetic_campaign,
+                    update_watermark=not args.no_watermarks
+                )
+
+                if result.status == "success":
+                    successful_tables += 1
+                    total_records += result.records_loaded
+                    logger.info(f"✅ {table_name}: {result.records_loaded:,} records loaded")
+                else:
+                    failed_tables.append(table_name)
+                    logger.error(f"❌ {table_name}: {result.error_message}")
+
+            except Exception as e:
+                failed_tables.append(table_name)
+                logger.error(f"❌ {table_name}: {str(e)}")
+                continue
+
+        duration = (datetime.now() - start_time).total_seconds()
+
+        # Mostrar resultados
+        logger.info("=" * 80)
+        logger.info("📊 DIRECT DATE EXTRACTION RESULTS")
+        logger.info("=" * 80)
+        logger.info(f"📅 Date range: {args.from_date} to {args.to_date}")
+        logger.info(f"✅ Successful tables: {successful_tables}/{len(tables_to_process)}")
+        logger.info(f"❌ Failed tables: {len(failed_tables)}")
+        if failed_tables:
+            logger.info(f"   Failed: {', '.join(failed_tables)}")
+        logger.info(f"📊 Total records loaded: {total_records:,}")
+        logger.info(f"⏱️ Duration: {duration:.2f}s")
+        logger.info(f"🔄 Watermarks updated: {not args.no_watermarks}")
+
+        return len(failed_tables) == 0
+
+    except Exception as e:
+        logger.error(f"❌ Direct date extraction failed: {e}", exc_info=True)
+        return False
 
 
 async def run_calendar_backfill(args) -> bool:
@@ -309,9 +403,6 @@ async def run_hybrid_auto(args) -> bool:
         return False
 
 
-# ... (resto del código igual: parse_date, parse_table_list, main, etc.)
-# Solo cambian las funciones de arriba
-
 def parse_date(date_string: str) -> date:
     """Helper para parsear fechas desde argumentos."""
     try:
@@ -332,12 +423,25 @@ async def main():
 
     try:
         # Parser básico para el fix temporal
-        parser = argparse.ArgumentParser(description="ETL Pipeline Runner - Hybrid with Fallback")
+        parser = argparse.ArgumentParser(description="ETL Pipeline Runner - Hybrid with Fallback + Direct Filtering")
 
         subparsers = parser.add_subparsers(dest='pipeline', help='Pipeline mode')
 
-        # Calendar parser
-        calendar_parser = subparsers.add_parser('catchup-calendar')
+        # 🆕 NUEVO: Direct date parser
+        direct_parser = subparsers.add_parser('catchup-direct', 
+                                            help='Direct extraction by creado_el date range (ignores campaigns)')
+        direct_parser.add_argument('--from-date', type=parse_date, required=True,
+                                 help='Start date for creado_el filter (YYYY-MM-DD)')
+        direct_parser.add_argument('--to-date', type=parse_date, required=True,
+                                 help='End date for creado_el filter (YYYY-MM-DD)')
+        direct_parser.add_argument('--tables', type=parse_table_list,
+                                 help='Comma-separated list of tables to process')
+        direct_parser.add_argument('--no-watermarks', action='store_true',
+                                 help='Skip watermark updates')
+
+        # Calendar parser (existente)
+        calendar_parser = subparsers.add_parser('catchup-calendar',
+                                              help='Campaign-based extraction using date windows')
         calendar_parser.add_argument('--from-date', type=parse_date, required=True)
         calendar_parser.add_argument('--to-date', type=parse_date, required=True)
         calendar_parser.add_argument('--limit', type=int)
@@ -345,13 +449,15 @@ async def main():
         calendar_parser.add_argument('--no-watermarks', action='store_true')
         calendar_parser.add_argument('--tables', type=parse_table_list)
 
-        # Incremental parser
-        incremental_parser = subparsers.add_parser('catchup-incremental')
+        # Incremental parser (existente)
+        incremental_parser = subparsers.add_parser('catchup-incremental',
+                                                 help='Watermark-based incremental extraction')
         incremental_parser.add_argument('--force', action='store_true')
         incremental_parser.add_argument('--tables', type=parse_table_list)
 
-        # Hybrid parser
-        hybrid_parser = subparsers.add_parser('catchup-hybrid')
+        # Hybrid parser (existente)
+        hybrid_parser = subparsers.add_parser('catchup-hybrid',
+                                            help='Auto-detect pending campaigns and process')
         hybrid_parser.add_argument('--force', action='store_true')
         hybrid_parser.add_argument('--limit', type=int)
         hybrid_parser.add_argument('--dry-run', action='store_true')
@@ -382,7 +488,9 @@ async def main():
         logger.info("✅ Dependencies initialized")
 
         # Execute pipeline
-        if args.pipeline == 'catchup-calendar':
+        if args.pipeline == 'catchup-direct':
+            success = await run_direct_date_filter(args)
+        elif args.pipeline == 'catchup-calendar':
             success = await run_calendar_backfill(args)
         elif args.pipeline == 'catchup-incremental':
             success = await run_incremental_refresh(args)
