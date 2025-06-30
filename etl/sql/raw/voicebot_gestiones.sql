@@ -9,4 +9,4 @@ SELECT
     duracion, id_telephony, url_record_bot,
     CURRENT_TIMESTAMP() as extraction_timestamp
 FROM `{project_id}.{dataset_id}.sync_voicebot_batch`
-WHERE DATE(date) >= {incremental_filter}; -- Ajuste para que el filtro sea compatible
+WHERE DATE(date) {incremental_filter};
