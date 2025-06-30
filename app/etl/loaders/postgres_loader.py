@@ -1,5 +1,5 @@
 """
-🎯 High-Performance PostgreSQL Loader with pure asyncpg
+🎯 High-Performance PostgreSQL Loader with pure asyncpg - STREAMING FIX
 Efficient, asynchronous data loading for ETL pipelines.
 
 Features:
@@ -9,7 +9,8 @@ Features:
 - Data validation and sanitization
 - Detailed load statistics and error reporting
 
-FIXED: Removed automatic fecha_procesamiento column that caused INSERT errors
+CRITICAL STREAMING FIX: Replaced individual record processing (23k+ queries) 
+with true batch processing using executemany() for efficient streaming loads
 """
 
 import time
@@ -40,6 +41,7 @@ class LoadResult:
 class PostgresLoader(LoggerMixin):
     """
     A high-performance data loader for PostgreSQL using asyncpg.
+    STREAMING FIX: True batch processing for efficient streaming pipeline
     """
 
     def __init__(self, db_manager: Optional[DatabaseManager] = None):
@@ -83,10 +85,6 @@ class PostgresLoader(LoggerMixin):
                 else:
                     sanitized_record[key] = value
 
-            # REMOVED: Automatic fecha_procesamiento addition that caused INSERT errors
-            # if 'fecha_procesamiento' not in sanitized_record:
-            #     sanitized_record['fecha_procesamiento'] = datetime.now(timezone.utc)
-
             validated_data.append(sanitized_record)
 
         return validated_data
@@ -100,8 +98,10 @@ class PostgresLoader(LoggerMixin):
         validate: bool = True
     ) -> LoadResult:
         """
-        Loads a batch of data into a PostgreSQL table.
-        IMPROVED: Better error handling and simpler INSERT construction
+        🚀 STREAMING FIX: Loads a batch using TRUE batch processing with executemany()
+        
+        BEFORE: 23,333 individual queries causing timeout/hanging
+        AFTER: Single executemany() operation for maximum streaming efficiency
         """
         start_time = time.time()
 
@@ -117,15 +117,19 @@ class PostgresLoader(LoggerMixin):
             )
 
         if validate:
-            data = self._validate_and_sanitize_batch(data, primary_key)
+            validated_data = self._validate_and_sanitize_batch(data, primary_key)
+            skipped_count = len(data) - len(validated_data)
+            data = validated_data
+        else:
+            skipped_count = 0
 
         if not data:
             return LoadResult(
                 table_name=table_name,
-                total_records=0,
+                total_records=skipped_count,
                 inserted_records=0,
                 updated_records=0,
-                skipped_records=len(data),
+                skipped_records=skipped_count,
                 load_duration_seconds=time.time() - start_time,
                 status="success",
                 error_message="No valid records to load after validation."
@@ -136,7 +140,7 @@ class PostgresLoader(LoggerMixin):
 
         async with pool.acquire() as conn:
             try:
-                # IMPROVED: Simpler INSERT construction for better debugging
+                # 🚀 STREAMING FIX: Build query once for batch processing
                 columns = list(data[0].keys())
                 columns_str = ", ".join(f'"{c}"' for c in columns)
                 placeholders = ", ".join(f"${i+1}" for i in range(len(columns)))
@@ -157,42 +161,44 @@ class PostgresLoader(LoggerMixin):
                         VALUES ({placeholders})
                     """
 
-                # IMPROVED: Process records one by one for better error reporting
-                inserted_count = 0
-                for i, record in enumerate(data):
-                    try:
-                        values = [record[col] for col in columns]
-                        await conn.execute(query, *values)
-                        inserted_count += 1
-                    except Exception as record_error:
-                        self.logger.error(f"Failed to insert record {i} into {table_name}: {record_error}")
-                        self.logger.debug(f"Failed record data: {record}")
-                        # Continue with other records instead of failing the entire batch
-                        continue
+                # 🚀 STREAMING FIX: Prepare all values for executemany()
+                batch_values = []
+                for record in data:
+                    values = [record.get(col) for col in columns]
+                    batch_values.append(values)
+
+                # 🚀 STREAMING FIX: Single executemany() call instead of 23k individual queries
+                self.logger.debug(f"Executing batch INSERT for {len(batch_values)} records into {table_name}")
                 
+                await conn.executemany(query, batch_values)
+                
+                inserted_count = len(batch_values)
                 duration = time.time() - start_time
-                self.logger.info(f"Loaded {inserted_count}/{len(data)} records into {table_name} in {duration:.2f}s.")
+                
+                self.logger.info(f"✅ Loaded {inserted_count} records for {table_name}")
 
                 return LoadResult(
                     table_name=table_name,
-                    total_records=len(data),
+                    total_records=len(data) + skipped_count,
                     inserted_records=inserted_count,
                     updated_records=0,  # Simplified for performance
-                    skipped_records=len(data) - inserted_count,
+                    skipped_records=skipped_count,
                     load_duration_seconds=duration,
-                    status="success" if inserted_count > 0 else "failed"
+                    status="success"
                 )
 
             except Exception as e:
                 duration = time.time() - start_time
-                error_msg = f"Failed to load data into {table_name}: {e}"
+                error_msg = f"Failed to load batch into {table_name}: {e}"
                 self.logger.error(error_msg)
+                self.logger.debug(f"Failed batch size: {len(data)} records")
+                
                 return LoadResult(
                     table_name=table_name,
-                    total_records=len(data),
+                    total_records=len(data) + skipped_count,
                     inserted_records=0,
                     updated_records=0,
-                    skipped_records=len(data),
+                    skipped_records=len(data) + skipped_count,
                     load_duration_seconds=duration,
                     status="failed",
                     error_message=error_msg
@@ -206,44 +212,75 @@ class PostgresLoader(LoggerMixin):
         upsert: bool = True
     ) -> LoadResult:
         """
-        Loads data from an async stream in batches.
+        🚀 STREAMING FIX: Loads data from an async stream in efficient batches
+        
+        This is the method called by CalendarDrivenCoordinator._load_campaign_table()
         """
         start_time = time.time()
         total_records, total_inserted, total_skipped = 0, 0, 0
         errors = []
 
-        async for batch in data_stream:
-            if not batch:
-                continue
+        self.logger.debug(f"Starting streaming load for {table_name}")
 
-            batch_result = await self.load_data_batch(
-                table_name,
-                batch,
-                primary_key,
-                upsert=upsert
+        try:
+            async for batch in data_stream:
+                if not batch:
+                    continue
+
+                # 🚀 STREAMING FIX: Each batch now uses efficient executemany()
+                batch_result = await self.load_data_batch(
+                    table_name,
+                    batch,
+                    primary_key,
+                    upsert=upsert
+                )
+
+                total_records += batch_result.total_records
+                total_inserted += batch_result.inserted_records
+                total_skipped += batch_result.skipped_records
+
+                if batch_result.status == "failed":
+                    errors.append(batch_result.error_message)
+                    self.logger.warning(f"Batch failed for {table_name}: {batch_result.error_message}")
+
+            duration = time.time() - start_time
+            status = "success" if not errors else ("partial_success" if total_inserted > 0 else "failed")
+            error_message = "; ".join(errors) if errors else None
+
+            # 🎯 This is what gets returned to _load_campaign_table()
+            final_result = LoadResult(
+                table_name=table_name,
+                total_records=total_records,
+                inserted_records=total_inserted,
+                updated_records=0,
+                skipped_records=total_skipped,
+                load_duration_seconds=duration,
+                status=status,
+                error_message=error_message
             )
 
-            total_records += batch_result.total_records
-            total_inserted += batch_result.inserted_records
-            total_skipped += batch_result.skipped_records
+            if status == "success":
+                self.logger.info(f"🎯 Streaming load completed for {table_name}: {total_inserted} records loaded")
+            else:
+                self.logger.error(f"❌ Streaming load failed for {table_name}: {error_message}")
 
-            if batch_result.status == "failed":
-                errors.append(batch_result.error_message)
+            return final_result
 
-        duration = time.time() - start_time
-        status = "success" if not errors else "partial_success"
-        error_message = "; ".join(errors) if errors else None
-
-        return LoadResult(
-            table_name=table_name,
-            total_records=total_records,
-            inserted_records=total_inserted,
-            updated_records=0,
-            skipped_records=total_skipped,
-            load_duration_seconds=duration,
-            status=status,
-            error_message=error_message
-        )
+        except Exception as e:
+            duration = time.time() - start_time
+            error_msg = f"Streaming load failed for {table_name}: {e}"
+            self.logger.error(error_msg, exc_info=True)
+            
+            return LoadResult(
+                table_name=table_name,
+                total_records=total_records,
+                inserted_records=total_inserted,
+                updated_records=0,
+                skipped_records=total_records - total_inserted,
+                load_duration_seconds=duration,
+                status="failed",
+                error_message=error_msg
+            )
 
     async def truncate_and_load(
         self,
