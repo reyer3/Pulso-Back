@@ -204,7 +204,7 @@ class ETLConfig:
             periodo_date,                      -- ✅ Real field name (partition column)
             tipo_ciclo_campana,                -- ✅ Real field name
             categoria_duracion,                -- ✅ Real field name
-            CURRENT_TIMESTAMP("America/Lima") as extraction_timestamp
+            CURRENT_TIMESTAMP() as extraction_timestamp
         FROM `mibot-222814.BI_USA.bi_P3fV4dWNeMkN5RJMhV8e_dash_calendario_v5`
         WHERE {incremental_filter}
         """,
@@ -228,7 +228,7 @@ class ETLConfig:
             archivo,                                   -- ✅ Real field name
             creado_el,                                 -- ✅ Real field name
             DATE(creado_el) as fecha_asignacion,       -- ✅ Derived from creado_el (partition column)
-            CURRENT_TIMESTAMP("America/Lima") as extraction_timestamp
+            CURRENT_TIMESTAMP() as extraction_timestamp
         FROM `mibot-222814.BI_USA.batch_P3fV4dWNeMkN5RJMhV8e_asignacion`
         WHERE {incremental_filter}
         """,
@@ -244,7 +244,7 @@ class ETLConfig:
             creado_el,                                 -- ✅ Real field name
             DATE(creado_el) as fecha_proceso,          -- ✅ Derived from creado_el (partition column)
             motivo_rechazo,                            -- ✅ Real field name
-            CURRENT_TIMESTAMP("America/Lima") as extraction_timestamp
+            CURRENT_TIMESTAMP() as extraction_timestamp
         FROM `mibot-222814.BI_USA.batch_P3fV4dWNeMkN5RJMhV8e_tran_deuda`
         WHERE {incremental_filter}
           AND monto_exigible > 0
@@ -261,7 +261,7 @@ class ETLConfig:
             archivo,                                   -- ✅ Real field name
             creado_el,                                 -- ✅ Real field name
             motivo_rechazo,                            -- ✅ Real field name
-            CURRENT_TIMESTAMP("America/Lima") as extraction_timestamp
+            CURRENT_TIMESTAMP() as extraction_timestamp
         FROM `mibot-222814.BI_USA.batch_P3fV4dWNeMkN5RJMhV8e_pagos`
         WHERE {incremental_filter}
           AND monto_cancelado > 0
@@ -285,7 +285,7 @@ class ETLConfig:
             es_contacto_no_efectivo,                   -- ✅ Real field name (BOOLEAN)
             es_compromiso,                             -- ✅ Real field name (BOOLEAN)
             peso_gestion,                              -- ✅ Real field name (INT64)
-            CURRENT_TIMESTAMP("America/Lima") as extraction_timestamp
+            CURRENT_TIMESTAMP() as extraction_timestamp
         FROM `mibot-222814.BI_USA.bi_P3fV4dWNeMkN5RJMhV8e_vw_gestiones_unificadas`
         WHERE {incremental_filter}
         """,
@@ -301,7 +301,7 @@ class ETLConfig:
                 codigo_rpta,
                 pdp,
                 gestor,
-                CURRENT_TIMESTAMP("America/Lima") as extraction_timestamp
+                CURRENT_TIMESTAMP() as extraction_timestamp
          FROM ` mibot-222814.BI_USA.homologacion_P3fV4dWNeMkN5RJMhV8e_v2 `
          WHERE {incremental_filter} -- This will be 1=1 for full refresh
          """,
@@ -317,7 +317,7 @@ class ETLConfig:
                 contactabilidad_homologada,
                 es_pdp_homologado,
                 peso_homologado,
-                CURRENT_TIMESTAMP("America/Lima") as extraction_timestamp
+                CURRENT_TIMESTAMP() as extraction_timestamp
          FROM ` mibot-222814.BI_USA.homologacion_P3fV4dWNeMkN5RJMhV8e_voicebot `
          WHERE {incremental_filter} -- This will be 1=1 for full refresh
          """,
@@ -327,7 +327,7 @@ class ETLConfig:
           SELECT DISTINCT correo_name,
                           TRIM(nombre)        as nombre,
                           document,
-                          CURRENT_TIMESTAMP("America/Lima") as extraction_timestamp
+                          CURRENT_TIMESTAMP() as extraction_timestamp
           FROM ` mibot-222814.BI_USA.sync_mibotair_batch_SYS_user `
           WHERE id_cliente = 145
             AND {incremental_filter} -- This will be 1=1 for full refresh

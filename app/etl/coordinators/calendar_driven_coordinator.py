@@ -119,7 +119,17 @@ class CalendarDrivenCoordinator(LoggerMixin):
     async def get_campaign_windows(self, limit: Optional[int] = None) -> List[CampaignWindow]:
         """Gets campaign windows from the 'raw_calendario' table."""
         await self._initialize_components()
-        query = "SELECT * FROM raw_calendario ORDER BY fecha_apertura"
+        query = """
+        SELECT 
+            archivo,
+            fecha_apertura,
+            fecha_trandeuda,
+            fecha_cierre,
+            tipo_cartera,
+            estado_cartera
+        FROM raw_calendario 
+        ORDER BY fecha_apertura
+        """
         if limit: query += f" LIMIT {limit}"
 
         try:
