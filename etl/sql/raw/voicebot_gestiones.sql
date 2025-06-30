@@ -8,5 +8,5 @@ SELECT
     weight, origin, fecha_compromiso, compromiso, observacion, project, client,
     duracion, id_telephony, url_record_bot,
     CURRENT_TIMESTAMP() as extraction_timestamp
-FROM `{project_id}.{dataset_id}.sync_voicebot_batch`
+FROM `{project_id}.{dataset_id}.voicebot_P3fV4dWNeMkN5RJMhV8e`
 WHERE DATE(date) {incremental_filter};

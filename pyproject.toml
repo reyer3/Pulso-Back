@@ -60,6 +60,7 @@ dependencies = [
     "flake8>=6.1.0",
     "mypy>=1.7.1",
     "dependency-injector>=4.48.1",
+    "sqlalchemy>=2.0.41",
 ]
 
 # --- DEPENDENCIAS OPCIONALES (PARA DESARROLLO EXTENDIDO) ---

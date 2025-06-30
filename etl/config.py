@@ -92,7 +92,7 @@ class ETLConfig:
             table_name="calendario",
             table_type=TableType.RAW,
             description="Campaign calendar definitions.",
-            primary_key=["archivo"],
+            primary_key=["archivo","periodo_date"],
             incremental_column="fecha_apertura",
             source_table="bi_P3fV4dWNeMkN5RJMhV8e_dash_calendario_v5"
         ),
@@ -182,7 +182,6 @@ class ETLConfig:
     }
 
     # --- HELPER METHODS ---
-
     @classmethod
     def get_config(cls, table_name: str) -> ExtractionConfig:
         """Retrieves the configuration for a specific table by its base name."""

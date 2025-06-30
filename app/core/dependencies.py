@@ -7,6 +7,7 @@ from fastapi import Depends
 import redis.asyncio as redis
 
 from app.core.cache import cache as redis_cache_manager
+from app.repositories.bigquery_repo import BigQueryRepository
 from app.repositories.postgres_repo import PostgresRepository
 from app.services.dashboard_service_v2 import DashboardServiceV2
 from app.services.cache_service import CacheService
@@ -31,6 +32,9 @@ def get_postgres_repo() -> PostgresRepository:
     # service needs to be injected here.
     return PostgresRepository()
 
+def get_bigquery_repo() -> BigQueryRepository:
+    """Provides the singleton instance of the BigQueryRepository."""
+    return BigQueryRepository()
 # -------------------------------------------------------------------
 # Domain Services (inject repositories)
 # -------------------------------------------------------------------

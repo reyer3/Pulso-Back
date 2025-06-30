@@ -8,5 +8,5 @@ SELECT
     weight, origin, n1, n2, n3, observacion, extra, project, client, nombre_agente,
     correo_agente, duracion, monto_compromiso, fecha_compromiso, url,
     CURRENT_TIMESTAMP() as extraction_timestamp
-FROM `{project_id}.{dataset_id}.sync_mibotair_batch`
+FROM `{project_id}.{dataset_id}.mibotair_P3fV4dWNeMkN5RJMhV8e`
 WHERE DATE(date) {incremental_filter};
