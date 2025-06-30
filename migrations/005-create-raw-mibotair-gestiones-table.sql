@@ -1,5 +1,5 @@
 -- 005: Create raw table for MibotAir gestiones for project P3fV4dWNeMkN5RJMhV8e
--- depends: 004-create-raw-voicebot-gestiones-table.sql
+-- depends: 004-create-raw-voicebot-gestiones-table
 
 -- Raw staging table for MibotAir (human agent) interaction data from BigQuery
 CREATE TABLE IF NOT EXISTS raw_P3fV4dWNeMkN5RJMhV8e.mibotair_gestiones (

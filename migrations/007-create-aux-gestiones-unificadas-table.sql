@@ -1,5 +1,5 @@
 -- 007: Create unified gestiones table in the auxiliary schema for project P3fV4dWNeMkN5RJMhV8e
--- depends: 006-create-aux-tables.sql
+-- depends: 006-create-aux-tables
 -- (Also depends on raw tables like raw_P3fV4dWNeMkN5RJMhV8e.asignaciones,
 -- raw_P3fV4dWNeMkN5RJMhV8e.homologacion_mibotair etc. for its data population,
 -- but structurally depends on the aux schema being present and potentially other aux tables if any FKs were planned)

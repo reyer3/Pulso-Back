@@ -2,7 +2,7 @@
 -- These tables are project-agnostic.
 -- depends: 000-enable-timescaledb
 
--- etl_watermarks table based on your provided 001-create-watermarks-table.sql
+-- etl_watermarks table based on your provided 001-create-watermarks-table
 CREATE TABLE IF NOT EXISTS public.etl_watermarks (
     id SERIAL PRIMARY KEY,
     table_name VARCHAR(100) NOT NULL UNIQUE,
@@ -33,7 +33,7 @@ COMMENT ON COLUMN public.etl_watermarks.error_message IS 'Error message if extra
 COMMENT ON COLUMN public.etl_watermarks.extraction_id IS 'Unique identifier for extraction run';
 COMMENT ON COLUMN public.etl_watermarks.metadata IS 'Additional metadata as JSON';
 
--- etl_execution_log table based on your provided 002-create-etl-execution-log-table.sql
+-- etl_execution_log table based on your provided 002-create-etl-execution-log-table
 CREATE TABLE IF NOT EXISTS public.etl_execution_log (
     id SERIAL,
     execution_id UUID NOT NULL,

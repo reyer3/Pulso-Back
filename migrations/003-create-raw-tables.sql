@@ -1,11 +1,11 @@
 -- 003: Create common raw staging tables for project P3fV4dWNeMkN5RJMhV8e
--- depends: 002-create-project-schemas.sql
+-- depends: 002-create-project-schemas
 
 -- Constants for project UID
 -- (Note: SQL doesn't have variables like this, schema is hardcoded. This is a comment.)
 -- PROJECT_UID = 'P3fV4dWNeMkN5RJMhV8e'
 
--- Raw Calendario (from original 011-create-raw-calendario-table.sql)
+-- Raw Calendario (from original 011-create-raw-calendario-table)
 CREATE TABLE IF NOT EXISTS raw_P3fV4dWNeMkN5RJMhV8e.calendario (
     ARCHIVO TEXT NOT NULL,
     TIPO_CARTERA TEXT,
@@ -40,7 +40,7 @@ CREATE INDEX IF NOT EXISTS idx_raw_calendario_estado ON raw_P3fV4dWNeMkN5RJMhV8e
 CREATE INDEX IF NOT EXISTS idx_raw_calendario_archivo ON raw_P3fV4dWNeMkN5RJMhV8e.calendario(ARCHIVO, periodo_date); -- Adjusted to include partition key
 COMMENT ON TABLE raw_P3fV4dWNeMkN5RJMhV8e.calendario IS 'Raw staging table for BigQuery calendario data for project P3fV4dWNeMkN5RJMhV8e.';
 
--- Raw Asignaciones (from original 012-create-raw-asignaciones-table.sql)
+-- Raw Asignaciones (from original 012-create-raw-asignaciones-table)
 CREATE TABLE IF NOT EXISTS raw_P3fV4dWNeMkN5RJMhV8e.asignaciones (
     cod_luna TEXT NOT NULL,
     cuenta TEXT NOT NULL,
@@ -89,7 +89,7 @@ CREATE INDEX IF NOT EXISTS idx_raw_asignaciones_archivo ON raw_P3fV4dWNeMkN5RJMh
 CREATE INDEX IF NOT EXISTS idx_raw_asignaciones_dni ON raw_P3fV4dWNeMkN5RJMhV8e.asignaciones(dni, fecha_asignacion); -- Added index on DNI as it's often used for joins
 COMMENT ON TABLE raw_P3fV4dWNeMkN5RJMhV8e.asignaciones IS 'Raw staging table for BigQuery asignaciones data for project P3fV4dWNeMkN5RJMhV8e.';
 
--- Raw Trandeuda (from original 013-create-raw-trandeuda-table.sql)
+-- Raw Trandeuda (from original 013-create-raw-trandeuda-table)
 CREATE TABLE IF NOT EXISTS raw_P3fV4dWNeMkN5RJMhV8e.trandeuda (
     cod_cuenta TEXT NOT NULL,
     nro_documento TEXT NOT NULL,
@@ -116,7 +116,7 @@ CREATE INDEX IF NOT EXISTS idx_raw_trandeuda_nro_documento ON raw_P3fV4dWNeMkN5R
 CREATE INDEX IF NOT EXISTS idx_raw_trandeuda_archivo ON raw_P3fV4dWNeMkN5RJMhV8e.trandeuda(archivo, fecha_proceso); -- Adjusted
 COMMENT ON TABLE raw_P3fV4dWNeMkN5RJMhV8e.trandeuda IS 'Raw staging table for BigQuery trandeuda data for project P3fV4dWNeMkN5RJMhV8e.';
 
--- Raw Pagos (from original 014-create-raw-pagos-table.sql)
+-- Raw Pagos (from original 014-create-raw-pagos-table)
 CREATE TABLE IF NOT EXISTS raw_P3fV4dWNeMkN5RJMhV8e.pagos (
     nro_documento TEXT NOT NULL,
     fecha_pago DATE NOT NULL, -- Also for TimescaleDB partitioning
@@ -142,7 +142,7 @@ CREATE INDEX IF NOT EXISTS idx_raw_pagos_nro_documento ON raw_P3fV4dWNeMkN5RJMhV
 CREATE INDEX IF NOT EXISTS idx_raw_pagos_archivo ON raw_P3fV4dWNeMkN5RJMhV8e.pagos(archivo, fecha_pago); -- Adjusted
 COMMENT ON TABLE raw_P3fV4dWNeMkN5RJMhV8e.pagos IS 'Raw staging table for BigQuery pagos data for project P3fV4dWNeMkN5RJMhV8e.';
 
--- Raw Homologacion MibotAir (from original 016-create-raw-homologacion-mibotair-table.sql)
+-- Raw Homologacion MibotAir (from original 016-create-raw-homologacion-mibotair-table)
 CREATE TABLE IF NOT EXISTS raw_P3fV4dWNeMkN5RJMhV8e.homologacion_mibotair (
     management TEXT,
     n_1 TEXT,
@@ -159,7 +159,7 @@ CREATE TABLE IF NOT EXISTS raw_P3fV4dWNeMkN5RJMhV8e.homologacion_mibotair (
 );
 COMMENT ON TABLE raw_P3fV4dWNeMkN5RJMhV8e.homologacion_mibotair IS 'Raw staging for MibotAir homologation rules for project P3fV4dWNeMkN5RJMhV8e.';
 
--- Raw Homologacion Voicebot (from original 017-create-raw-homologacion-voicebot-table.sql)
+-- Raw Homologacion Voicebot (from original 017-create-raw-homologacion-voicebot-table)
 CREATE TABLE IF NOT EXISTS raw_P3fV4dWNeMkN5RJMhV8e.homologacion_voicebot (
     bot_management TEXT,
     bot_sub_management TEXT,
@@ -175,7 +175,7 @@ CREATE TABLE IF NOT EXISTS raw_P3fV4dWNeMkN5RJMhV8e.homologacion_voicebot (
 );
 COMMENT ON TABLE raw_P3fV4dWNeMkN5RJMhV8e.homologacion_voicebot IS 'Raw staging for Voicebot homologation rules for project P3fV4dWNeMkN5RJMhV8e.';
 
--- Raw Ejecutivos (from original 018-create-raw-ejecutivos-table.sql)
+-- Raw Ejecutivos (from original 018-create-raw-ejecutivos-table)
 CREATE TABLE IF NOT EXISTS raw_P3fV4dWNeMkN5RJMhV8e.ejecutivos (
     correo_name TEXT PRIMARY KEY,
     document TEXT NOT NULL,

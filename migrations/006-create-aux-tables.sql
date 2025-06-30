@@ -1,12 +1,12 @@
 -- 006: Create auxiliary tables for project P3fV4dWNeMkN5RJMhV8e
--- depends: 005-create-raw-mibotair-gestiones-table.sql
--- (or 002-create-project-schemas.sql if raw tables are not direct dependencies for aux structure)
+-- depends: 005-create-raw-mibotair-gestiones-table
+-- (or 002-create-project-schemas if raw tables are not direct dependencies for aux structure)
 
 -- Function for updated_at triggers within the aux schema (if not already created in raw schema's function)
 -- It's better to have schema-qualified function names if they are specific or use public if generic.
 -- Re-using the one from raw schema for now: raw_P3fV4dWNeMkN5RJMhV8e.update_timestamp_column()
 
--- Aux Cuenta Campana State (from original 008-create-cuenta-campana-state-table.sql)
+-- Aux Cuenta Campana State (from original 008-create-cuenta-campana-state-table)
 CREATE TABLE IF NOT EXISTS aux_P3fV4dWNeMkN5RJMhV8e.cuenta_campana_state (
     archivo VARCHAR(200) NOT NULL,
     cod_luna VARCHAR(50) NOT NULL,
@@ -32,7 +32,7 @@ CREATE TRIGGER trigger_ccs_updated_at
     FOR EACH ROW
     EXECUTE FUNCTION raw_P3fV4dWNeMkN5RJMhV8e.update_timestamp_column();
 
--- Aux Gestion Cuenta Impact (from original 009-create-gestion-cuenta-impact-table.sql)
+-- Aux Gestion Cuenta Impact (from original 009-create-gestion-cuenta-impact-table)
 CREATE TABLE IF NOT EXISTS aux_P3fV4dWNeMkN5RJMhV8e.gestion_cuenta_impact (
     archivo VARCHAR(200) NOT NULL,
     cod_luna VARCHAR(50) NOT NULL,
@@ -67,7 +67,7 @@ CREATE TRIGGER trigger_gci_updated_at
     FOR EACH ROW
     EXECUTE FUNCTION raw_P3fV4dWNeMkN5RJMhV8e.update_timestamp_column();
 
--- Aux Pago Deduplication (from original 010-create-pago-deduplication-table.sql)
+-- Aux Pago Deduplication (from original 010-create-pago-deduplication-table)
 CREATE TABLE IF NOT EXISTS aux_P3fV4dWNeMkN5RJMhV8e.pago_deduplication (
     archivo VARCHAR(200) NOT NULL,
     cuenta VARCHAR(50) NOT NULL,

@@ -1,5 +1,5 @@
 -- 004: Create raw table for Voicebot gestiones for project P3fV4dWNeMkN5RJMhV8e
--- depends: 003-create-raw-tables.sql
+-- depends: 003-create-raw-tables
 
 -- Raw staging table for Voicebot interaction data from BigQuery
 CREATE TABLE IF NOT EXISTS raw_P3fV4dWNeMkN5RJMhV8e.voicebot_gestiones (

@@ -1,12 +1,12 @@
 -- 008: Create final mart tables for project P3fV4dWNeMkN5RJMhV8e
--- depends: 007-create-aux-gestiones-unificadas-table.sql
+-- depends: 007-create-aux-gestiones-unificadas-table
 -- (Mart tables depend on the structure of aux and raw tables for their data sources)
 
 -- Re-using the update_timestamp_column function, assuming it's accessible (e.g., created in raw_P3fV4dWNeMkN5RJMhV8e schema or public)
 -- If it needs to be schema-specific for mart:
 -- CREATE OR REPLACE FUNCTION mart_P3fV4dWNeMkN5RJMhV8e.update_timestamp_column() ...
 
--- Mart Dashboard Data (from original 003-create-dashboard-data-table.sql)
+-- Mart Dashboard Data (from original 003-create-dashboard-data-table)
 CREATE TABLE IF NOT EXISTS mart_P3fV4dWNeMkN5RJMhV8e.dashboard_data (
     fecha_foto DATE NOT NULL, -- For TimescaleDB partitioning
     archivo VARCHAR(100) NOT NULL,
@@ -48,7 +48,7 @@ CREATE TRIGGER trigger_mart_dd_updated_at
     FOR EACH ROW
     EXECUTE FUNCTION raw_P3fV4dWNeMkN5RJMhV8e.update_timestamp_column();
 
--- Mart Evolution Data (from original 004-create-evolution-data-table.sql)
+-- Mart Evolution Data (from original 004-create-evolution-data-table)
 CREATE TABLE IF NOT EXISTS mart_P3fV4dWNeMkN5RJMhV8e.evolution_data (
     fecha_foto DATE NOT NULL, -- For TimescaleDB partitioning
     archivo VARCHAR(100) NOT NULL, -- Assuming archivo helps define uniqueness with fecha_foto
@@ -76,7 +76,7 @@ CREATE TRIGGER trigger_mart_ed_updated_at
     FOR EACH ROW
     EXECUTE FUNCTION raw_P3fV4dWNeMkN5RJMhV8e.update_timestamp_column();
 
--- Mart Assignment Data (from original 005-create-assignment-data-table.sql)
+-- Mart Assignment Data (from original 005-create-assignment-data-table)
 -- This table does not seem to be time-series in the same way, uses 'periodo' (YYYY-MM). Not making it a hypertable.
 CREATE TABLE IF NOT EXISTS mart_P3fV4dWNeMkN5RJMhV8e.assignment_data (
     periodo VARCHAR(7) NOT NULL,
@@ -101,7 +101,7 @@ CREATE TRIGGER trigger_mart_ad_updated_at
     FOR EACH ROW
     EXECUTE FUNCTION raw_P3fV4dWNeMkN5RJMhV8e.update_timestamp_column();
 
--- Mart Operation Data (from original 006-create-operation-data-table.sql)
+-- Mart Operation Data (from original 006-create-operation-data-table)
 CREATE TABLE IF NOT EXISTS mart_P3fV4dWNeMkN5RJMhV8e.operation_data (
     fecha_foto DATE NOT NULL, -- For TimescaleDB partitioning
     hora INTEGER NOT NULL,
@@ -130,7 +130,7 @@ CREATE TRIGGER trigger_mart_opd_updated_at
     FOR EACH ROW
     EXECUTE FUNCTION raw_P3fV4dWNeMkN5RJMhV8e.update_timestamp_column();
 
--- Mart Productivity Data (from original 007-create-productivity-data-table.sql)
+-- Mart Productivity Data (from original 007-create-productivity-data-table)
 CREATE TABLE IF NOT EXISTS mart_P3fV4dWNeMkN5RJMhV8e.productivity_data (
     fecha_foto DATE NOT NULL, -- For TimescaleDB partitioning
     correo_agente VARCHAR(100) NOT NULL,

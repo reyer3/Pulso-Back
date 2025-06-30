@@ -1,6 +1,5 @@
 -- 000: Enable TimescaleDB extension
 -- This should be one of the very first migrations to run.
--- depends:
 
 -- Create TimescaleDB extension if available
 CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;
