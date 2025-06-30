@@ -21,4 +21,4 @@ SELECT
     DATE(creado_el) as fecha_asignacion,
     CURRENT_TIMESTAMP() as extraction_timestamp
 FROM `mibot-222814.BI_USA.batch_P3fV4dWNeMkN5RJMhV8e_asignacion`
-WHERE {incremental_filter};
+WHERE creado_el {incremental_filter};
