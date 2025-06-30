@@ -56,7 +56,7 @@ async def debug_campaigns():
             schema_result = await db.execute_query(schema_query)
             logger.info("Available tables in raw_P3fV4dWNeMkN5RJMhV8e schema:")
             for row in schema_result:
-                table_name = row[0] if isinstance(row, tuple) else row['table_name']
+                table_name = row[0]  # Siempre tupla
                 logger.info(f"  • {table_name}")
             
             return False
@@ -75,12 +75,8 @@ async def debug_campaigns():
         structure_result = await db.execute_query(structure_query)
         logger.info("Table structure:")
         for row in structure_result:
-            if isinstance(row, tuple):
-                col_name, data_type, nullable = row
-            else:
-                col_name = row['column_name']
-                data_type = row['data_type']
-                nullable = row['is_nullable']
+            # 🔧 FIX: Siempre asumir tupla
+            col_name, data_type, nullable = row[0], row[1], row[2]
             logger.info(f"  • {col_name}: {data_type} ({'NULL' if nullable == 'YES' else 'NOT NULL'})")
         
         # 3. Contar registros totales
@@ -100,7 +96,7 @@ async def debug_campaigns():
         logger.info("🔍 Step 4: Showing sample records...")
         
         sample_query = """
-        SELECT archivo, fecha_apertura, fecha_cierre
+        SELECT archivo, fecha_apertura, fecha_cierre, tipo_cartera, estado_cartera
         FROM raw_P3fV4dWNeMkN5RJMhV8e.calendario 
         ORDER BY fecha_apertura DESC 
         LIMIT 5;
@@ -112,21 +108,22 @@ async def debug_campaigns():
         
         for i, row in enumerate(sample_result, 1):
             logger.info(f"Raw row {i} type: {type(row)}")
+            logger.info(f"Raw row {i} length: {len(row)}")
             logger.info(f"Raw row {i} content: {row}")
             
             try:
-                if isinstance(row, tuple):
-                    archivo = row[0] if len(row) > 0 else "N/A"
-                    fecha_apertura = row[1] if len(row) > 1 else "N/A"
-                    fecha_cierre = row[2] if len(row) > 2 else "N/A"
-                else:
-                    archivo = row.get('archivo', 'N/A')
-                    fecha_apertura = row.get('fecha_apertura', 'N/A')
-                    fecha_cierre = row.get('fecha_cierre', 'N/A')
+                # 🔧 FIX: Siempre asumir tupla
+                archivo = row[0] if len(row) > 0 else "N/A"
+                fecha_apertura = row[1] if len(row) > 1 else "N/A"
+                fecha_cierre = row[2] if len(row) > 2 else "N/A"
+                tipo_cartera = row[3] if len(row) > 3 else "N/A"
+                estado_cartera = row[4] if len(row) > 4 else "N/A"
                 
                 logger.info(f"  {i}. Archivo: {archivo}")
                 logger.info(f"     Apertura: {fecha_apertura}")
                 logger.info(f"     Cierre: {fecha_cierre}")
+                logger.info(f"     Tipo: {tipo_cartera}")
+                logger.info(f"     Estado: {estado_cartera}")
                 logger.info("-" * 50)
                 
             except Exception as e:
@@ -138,38 +135,78 @@ async def debug_campaigns():
         
         search_campaign = "Cartera_Agencia_Cobranding_Gestion_Temprana_20250401_25"
         
-        search_query = """
+        # Búsqueda exacta
+        exact_query = """
         SELECT archivo, fecha_apertura, fecha_cierre
         FROM raw_P3fV4dWNeMkN5RJMhV8e.calendario 
-        WHERE archivo ILIKE $1
-        LIMIT 5;
+        WHERE archivo = $1;
         """
         
-        search_result = await db.execute_query(search_query, f"%{search_campaign[:30]}%")
+        exact_result = await db.execute_query(exact_query, search_campaign)
         
-        if search_result:
-            logger.info(f"Found campaigns matching '{search_campaign[:30]}':")
-            for i, row in enumerate(search_result, 1):
-                if isinstance(row, tuple):
-                    archivo = row[0]
-                else:
-                    archivo = row.get('archivo', 'N/A')
-                logger.info(f"  {i}. {archivo}")
+        if exact_result:
+            logger.info(f"✅ Found exact match for '{search_campaign}':")
+            row = exact_result[0]
+            archivo = row[0]
+            fecha_apertura = row[1]
+            fecha_cierre = row[2]
+            logger.info(f"  • Archivo: {archivo}")
+            logger.info(f"  • Apertura: {fecha_apertura}")
+            logger.info(f"  • Cierre: {fecha_cierre}")
         else:
-            logger.warning(f"No campaigns found matching '{search_campaign[:30]}'")
+            logger.warning(f"❌ No exact match for '{search_campaign}'")
             
-            # Buscar campañas con nombres similares
-            partial_search = search_query
-            partial_result = await db.execute_query(partial_search, "%Cartera_Agencia%")
+            # Búsqueda parcial
+            search_query = """
+            SELECT archivo, fecha_apertura, fecha_cierre
+            FROM raw_P3fV4dWNeMkN5RJMhV8e.calendario 
+            WHERE archivo ILIKE $1
+            LIMIT 10;
+            """
             
-            if partial_result:
-                logger.info("Similar campaigns found:")
-                for i, row in enumerate(partial_result, 1):
-                    if isinstance(row, tuple):
+            search_result = await db.execute_query(search_query, f"%{search_campaign[:30]}%")
+            
+            if search_result:
+                logger.info(f"🔍 Found campaigns matching '{search_campaign[:30]}':")
+                for i, row in enumerate(search_result, 1):
+                    archivo = row[0]
+                    fecha_apertura = row[1]
+                    logger.info(f"  {i}. {archivo} ({fecha_apertura})")
+            else:
+                logger.warning(f"❌ No campaigns found matching '{search_campaign[:30]}'")
+                
+                # Buscar campañas con nombres similares
+                partial_result = await db.execute_query(search_query, "%Cartera_Agencia%")
+                
+                if partial_result:
+                    logger.info("🔍 Similar campaigns found:")
+                    for i, row in enumerate(partial_result, 1):
                         archivo = row[0]
-                    else:
-                        archivo = row.get('archivo', 'N/A')
-                    logger.info(f"  {i}. {archivo}")
+                        fecha_apertura = row[1]
+                        logger.info(f"  {i}. {archivo} ({fecha_apertura})")
+                else:
+                    logger.warning("❌ No similar campaigns found")
+        
+        # 6. Mostrar las 10 campañas más recientes
+        logger.info("🔍 Step 6: Most recent 10 campaigns...")
+        
+        recent_query = """
+        SELECT archivo, fecha_apertura, fecha_cierre
+        FROM raw_P3fV4dWNeMkN5RJMhV8e.calendario 
+        ORDER BY fecha_apertura DESC 
+        LIMIT 10;
+        """
+        
+        recent_result = await db.execute_query(recent_query)
+        logger.info("📋 Most recent campaigns:")
+        logger.info("-" * 100)
+        
+        for i, row in enumerate(recent_result, 1):
+            archivo = row[0]
+            fecha_apertura = row[1]
+            fecha_cierre = row[2] if row[2] else "Ongoing"
+            logger.info(f"{i:2d}. {archivo}")
+            logger.info(f"    📅 {fecha_apertura} → {fecha_cierre}")
         
         logger.info("✅ Diagnosis completed successfully")
         return True
