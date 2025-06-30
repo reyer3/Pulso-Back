@@ -1,6 +1,6 @@
 -- 001: Create core ETL metadata and monitoring tables in the public schema
 -- These tables are project-agnostic.
--- depends: 000-enable-timescaledb.sql
+-- depends: 000-enable-timescaledb
 
 -- etl_watermarks table based on your provided 001-create-watermarks-table.sql
 CREATE TABLE IF NOT EXISTS public.etl_watermarks (
