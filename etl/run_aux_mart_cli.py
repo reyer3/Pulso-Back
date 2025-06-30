@@ -59,7 +59,14 @@ async def get_campaign_from_postgres(archivo: str) -> CampaignWindow:
         if not result:
             raise ValueError(f"Campaign '{archivo}' not found in PostgreSQL calendario table")
         
-        row = result[0]
+        # 🔧 FIX: Obtener row correctamente dependiendo del tipo de resultado
+        if isinstance(result[0], dict):
+            # Si result es lista de diccionarios
+            row = result[0]
+        else:
+            # Si result es lista de tuplas, convertir a diccionario
+            columns = ['archivo', 'fecha_apertura', 'fecha_cierre', 'tipo_cartera', 'estado_cartera']
+            row = dict(zip(columns, result[0]))
         
         # Convertir fechas si es necesario
         fecha_apertura = row['fecha_apertura']
@@ -230,7 +237,12 @@ async def cmd_validate(args) -> bool:
                 WHERE archivo = $1
                 """
                 result = await db.execute_query(count_query, campaign.archivo)
-                count = result[0]['count'] if result else 0
+                
+                # 🔧 FIX: Manejo correcto del resultado
+                if isinstance(result[0], dict):
+                    count = result[0]['count']
+                else:
+                    count = result[0][0]  # Primera columna si es tupla
                 
                 if count == 0:
                     raise Exception(f"RAW table {table} has no records for campaign")
@@ -275,7 +287,12 @@ async def cmd_validate(args) -> bool:
                 WHERE archivo = $1
                 """
                 result = await db.execute_query(count_query, campaign.archivo)
-                count = result[0]['count'] if result else 0
+                
+                # 🔧 FIX: Manejo correcto del resultado
+                if isinstance(result[0], dict):
+                    count = result[0]['count']
+                else:
+                    count = result[0][0]  # Primera columna si es tupla
                 
                 logger.debug(f"✅ MART {table}: {count:,} records")
                 
