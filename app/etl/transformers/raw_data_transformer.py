@@ -46,7 +46,7 @@ class RawDataTransformer(LoggerMixin):
     ISO_DATE_FORMAT = '%Y-%m-%d'
 
     def __init__(self):
-        super().__init__(self)
+        super().__init__()  # Fixed: removed extra parameter
         self.transformation_stats = {
             'records_processed': 0,
             'records_transformed': 0,
@@ -785,7 +785,7 @@ class RawTransformerRegistry:
 
         # Map raw table names to transformation methods
         self.raw_transformer_mapping = {
-            'raw_calendario': lambda raw_data: self.transformer.transform_raw_calendario,
+            'raw_calendario': self.transformer.transform_raw_calendario,  # Fixed: removed lambda wrapper
             'raw_asignaciones': self.transformer.transform_raw_asignaciones,
             'raw_trandeuda': self.transformer.transform_raw_trandeuda,
             'raw_pagos': self.transformer.transform_raw_pagos,
