@@ -1,13 +1,13 @@
-# etl/dependencies.py - SINTAXIS CORREGIDA
+# etl/dependencies.py - ACTUALIZADO CON MART TRANSFORMERS
 
 """
-🔧 ETL Dependencies Container - CORREGIDO
+🔧 ETL Dependencies Container - UPDATED
 
-FIXES:
-- Comas extra removidas
-- Estructura correcta del constructor
-- Imports añadidos
-- Parámetros ordenados correctamente
+NUEVO:
+- Integración con mart transformers
+- Factory para mart transformers
+- Soporte para lógica Python en marts
+- Manteniendo compatibilidad existente
 """
 
 from typing import Optional
@@ -20,13 +20,20 @@ from etl.loaders.postgres_loader import PostgresLoader
 from etl.pipelines.campaign_catchup_pipeline import CampaignCatchUpPipeline
 # Transformers
 from etl.transformers.raw_data_transformer import RawTransformerRegistry
+
+# NEW: Mart transformers
+from etl.transformers import (
+    MartTransformerRegistry, 
+    MartTransformerFactory,
+    get_mart_transformer_registry
+)
+
 from shared.core.logging import LoggerMixin
 from shared.database.connection import get_database_manager, DatabaseManager
 
 # 🔧 FIXED: Import desde el archivo correcto donde está el HybridRawDataPipeline
 try:
     from etl.pipelines.raw_data_pipeline import HybridRawDataPipeline, ExtractionStrategy
-
     HYBRID_PIPELINE_AVAILABLE = True
 except ImportError:
     HYBRID_PIPELINE_AVAILABLE = False
@@ -35,7 +42,6 @@ except ImportError:
 # 🔧 FIXED: Import condicional para MartBuildPipeline
 try:
     from etl.pipelines.mart_build_pipeline import MartBuildPipeline
-
     MART_PIPELINE_AVAILABLE = True
 except ImportError:
     MART_PIPELINE_AVAILABLE = False
@@ -50,10 +56,10 @@ class ETLDependencies(LoggerMixin):
     """
     Contenedor de dependencias para el sistema ETL.
 
-    🔧 CORREGIDO:
-    - Sintaxis de constructores arreglada
-    - Imports condicionales para compatibilidad
-    - Parámetros ordenados correctamente
+    🆕 ACTUALIZADO:
+    - Añadido soporte para mart transformers
+    - Factory pattern para mart transformers
+    - Integración con pipeline existente
     """
 
     def __init__(self):
@@ -66,6 +72,9 @@ class ETLDependencies(LoggerMixin):
         self._bigquery_extractor: Optional[BigQueryExtractor] = None
         self._raw_transformer_registry: Optional[RawTransformerRegistry] = None
         self._postgres_loader: Optional[PostgresLoader] = None
+
+        # NEW: Mart transformers
+        self._mart_transformer_registry: Optional[MartTransformerRegistry] = None
 
         # Watermarks
         self._watermark_manager: Optional[WatermarkManager] = None
@@ -100,6 +109,7 @@ class ETLDependencies(LoggerMixin):
         self._bigquery_extractor = None
         self._raw_transformer_registry = None
         self._postgres_loader = None
+        self._mart_transformer_registry = None  # NEW
         self._watermark_manager = None
         self._raw_data_pipeline = None
         self._hybrid_raw_pipeline = None
@@ -124,6 +134,14 @@ class ETLDependencies(LoggerMixin):
             self._raw_transformer_registry = RawTransformerRegistry()
         return self._raw_transformer_registry
 
+    def mart_transformer_registry(self) -> MartTransformerRegistry:
+        """🆕 Get mart transformer registry"""
+        if self._mart_transformer_registry is None:
+            self._mart_transformer_registry = get_mart_transformer_registry(
+                project_uid=ETLConfig.PROJECT_UID
+            )
+        return self._mart_transformer_registry
+
     async def postgres_loader(self) -> PostgresLoader:
         """Get PostgreSQL loader instance"""
         if self._postgres_loader is None:
@@ -141,7 +159,6 @@ class ETLDependencies(LoggerMixin):
     # =============================================================================
     # PIPELINES
     # =============================================================================
-
 
     async def hybrid_raw_pipeline(self):
         """Get hybrid raw data pipeline (si está disponible)"""
@@ -161,7 +178,7 @@ class ETLDependencies(LoggerMixin):
         return self._hybrid_raw_pipeline
 
     async def mart_build_pipeline(self):
-        """🔧 FIXED: Get mart build pipeline instance"""
+        """🔧 UPDATED: Get mart build pipeline instance with mart transformers"""
         if not MART_PIPELINE_AVAILABLE:
             self.logger.warning("⚠️ Mart build pipeline not available")
             return None
@@ -172,7 +189,7 @@ class ETLDependencies(LoggerMixin):
 
             self._mart_build_pipeline = MartBuildPipeline(
                 db_manager=self._db_manager,
-                project_uid=ETLConfig.PROJECT_UID  # 🔧 FIXED: Sin () porque es una constante
+                project_uid=ETLConfig.PROJECT_UID
             )
 
         return self._mart_build_pipeline
@@ -204,6 +221,21 @@ class ETLDependencies(LoggerMixin):
         return self._campaign_catchup_pipeline
 
     # =============================================================================
+    # NEW: MART TRANSFORMER UTILITIES
+    # =============================================================================
+
+    def create_mart_transformer(self, mart_type: str):
+        """🆕 Create specific mart transformer instance"""
+        return MartTransformerFactory.create_transformer(
+            mart_type=mart_type,
+            project_uid=ETLConfig.PROJECT_UID
+        )
+
+    def get_available_mart_transformers(self) -> list:
+        """🆕 Get list of available mart transformers"""
+        return MartTransformerFactory.get_available_transformers()
+
+    # =============================================================================
     # UTILITY METHODS
     # =============================================================================
 
@@ -216,6 +248,7 @@ class ETLDependencies(LoggerMixin):
             "watermark_system": "unknown",
             "hybrid_pipeline": "unknown",
             "mart_pipeline": "unknown",
+            "mart_transformers": "unknown",  # NEW
             "overall_status": "unknown"
         }
 
@@ -252,6 +285,14 @@ class ETLDependencies(LoggerMixin):
             health_status["hybrid_pipeline"] = "available" if HYBRID_PIPELINE_AVAILABLE else "not_available"
             health_status["mart_pipeline"] = "available" if MART_PIPELINE_AVAILABLE else "not_available"
 
+            # NEW: Check mart transformers
+            try:
+                registry = self.mart_transformer_registry()
+                available_transformers = registry.get_supported_marts()
+                health_status["mart_transformers"] = f"healthy ({len(available_transformers)} transformers)"
+            except Exception:
+                health_status["mart_transformers"] = "unhealthy"
+
             # Overall status
             critical_components = ["database", "bigquery_extractor", "postgres_loader", "watermark_system"]
             unhealthy_critical = [k for k in critical_components if
@@ -280,7 +321,7 @@ etl_dependencies = ETLDependencies()
 
 
 # =============================================================================
-# CONVENIENCE FUNCTIONS (backward compatibility)
+# CONVENIENCE FUNCTIONS (backward compatibility + new)
 # =============================================================================
 
 async def get_bigquery_extractor() -> BigQueryExtractor:
@@ -298,6 +339,16 @@ async def get_raw_transformer_registry() -> RawTransformerRegistry:
     return etl_dependencies.raw_transformer_registry()
 
 
+def get_mart_transformer_registry_dep() -> MartTransformerRegistry:
+    """🆕 Convenience function for getting mart transformer registry"""
+    return etl_dependencies.mart_transformer_registry()
+
+
+def create_mart_transformer(mart_type: str):
+    """🆕 Convenience function for creating mart transformer"""
+    return etl_dependencies.create_mart_transformer(mart_type)
+
+
 async def get_hybrid_raw_pipeline():
     """Convenience function for getting hybrid pipeline (with fallback)"""
     return await etl_dependencies.hybrid_raw_pipeline()
@@ -306,6 +357,11 @@ async def get_hybrid_raw_pipeline():
 async def get_campaign_catchup_pipeline() -> CampaignCatchUpPipeline:
     """Convenience function for getting catchup pipeline"""
     return await etl_dependencies.campaign_catchup_pipeline()
+
+
+async def get_mart_build_pipeline():
+    """🆕 Convenience function for getting mart build pipeline"""
+    return await etl_dependencies.mart_build_pipeline()
 
 
 # =============================================================================
