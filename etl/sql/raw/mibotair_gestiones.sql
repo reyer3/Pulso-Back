@@ -9,4 +9,4 @@ SELECT
     correo_agente, duracion, monto_compromiso, fecha_compromiso, url,
     CURRENT_TIMESTAMP() as extraction_timestamp
 FROM `{project_id}.{dataset_id}.sync_mibotair_batch`
-WHERE DATE(date) >= {incremental_filter};
+WHERE DATE(date) {incremental_filter};
