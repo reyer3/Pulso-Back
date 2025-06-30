@@ -15,7 +15,7 @@ from dataclasses import dataclass
 import asyncio
 
 from app.core.logging import LoggerMixin
-from app.etl.config import ETLConfig, TableType
+from app.etl.config import ETLConfig, TableType, ExtractionMode  # FIXED: Added ExtractionMode import
 from app.etl.extractors.bigquery_extractor import BigQueryExtractor
 from app.etl.transformers.raw_data_transformer import RawTransformerRegistry, get_raw_transformer_registry
 from app.etl.loaders.postgres_loader import PostgresLoader, LoadResult
@@ -285,7 +285,7 @@ class CampaignCatchUpPipeline(LoggerMixin):
 
         # Construct the filter condition string
         filter_condition = "1=1"  # Default for full refresh tables
-        if start_date and end_date and date_filter_column != "1=1":
+        if config.default_mode != ExtractionMode.FULL_REFRESH and start_date and end_date and date_filter_column != "1=1":  # FIXED: Now uses imported ExtractionMode
             filter_condition = f"DATE({date_filter_column}) BETWEEN '{start_date.strftime('%Y-%m-%d')}' AND '{end_date.strftime('%Y-%m-%d')}'"
             if table_base_name == "asignaciones":
                 filter_condition = f"(archivo = '{campaign.archivo}' OR {filter_condition})"
