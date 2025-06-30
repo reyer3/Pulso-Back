@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional
 
 from etl.models import CampaignWindow, CampaignLoadResult, PipelineExecutionSummary
 from etl.pipelines.mart_build_pipeline import MartBuildPipeline
-from etl.pipelines.raw_data_pipeline import RawDataPipeline
+from etl.pipelines.raw_data_pipeline import HybridRawDataPipeline
 from etl.watermarks import WatermarkManager
 from etl.config import ETLConfig
 from shared.core.logging import LoggerMixin
@@ -28,7 +28,7 @@ class CampaignCatchUpPipeline(LoggerMixin):
             self,
             db_manager: DatabaseManager,
             watermark_manager: WatermarkManager,
-            raw_data_pipeline: RawDataPipeline,
+            raw_data_pipeline: HybridRawDataPipeline,
             mart_build_pipeline: MartBuildPipeline,
     ):
         super().__init__()
