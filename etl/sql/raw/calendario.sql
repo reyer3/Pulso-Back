@@ -21,4 +21,4 @@ SELECT
     categoria_duracion,
     CURRENT_TIMESTAMP() as extraction_timestamp
 FROM `mibot-222814.BI_USA.bi_P3fV4dWNeMkN5RJMhV8e_dash_calendario_v5`
-WHERE fecha_apertura {incremental_filter};
+WHERE {incremental_filter};
