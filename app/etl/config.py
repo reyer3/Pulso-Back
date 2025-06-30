@@ -6,10 +6,10 @@ ISSUE FIXED: Config used "ARCHIVO" but transformer outputs "archivo"
 ROOT CAUSE: Case mismatch between config primary_key and transformer output
 """
 
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import Enum
 from typing import Dict, List, Optional
-from dataclasses import dataclass
 
 
 class ExtractionMode(str, Enum):
@@ -21,6 +21,7 @@ class ExtractionMode(str, Enum):
 
 class TableType(str, Enum):
     """Table types for different dashboard purposes"""
+    DIMENSION = "dimansion"
     DASHBOARD = "dashboard"        # Main dashboard aggregation
     EVOLUTION = "evolution"        # Time series data
     ASSIGNMENT = "assignment"      # Monthly comparisons
@@ -39,7 +40,7 @@ class ExtractionConfig:
     
     # Primary key configuration - ✅ CASE FIXED FOR TRANSFORMER OUTPUT
     primary_key: List[str]
-    incremental_column: str
+    incremental_column: Optional[str]
     
     # Extraction strategy
     default_mode: ExtractionMode = ExtractionMode.INCREMENTAL
@@ -142,6 +143,42 @@ class ETLConfig:
             refresh_frequency_hours=1,
             required_columns=["cod_luna", "fecha_gestion"],  # ✅ lowercase
             min_expected_records=1
+        ),
+
+        # 👨‍💼 HOMOLOGACION AGENTES (MIBOTAIR)
+        "raw_homologacion_mibotair": ExtractionConfig(
+            table_name="raw_homologacion_mibotair",
+            table_type=TableType.DIMENSION,
+            description="Homologation rules for human agent interactions (MibotAir)",
+            primary_key=["n_1", "n_2", "n_3"],
+            incremental_column=None,  # This is a dimension table, always full load
+            source_table="homologacion_P3fV4dWNeMkN5RJMhV8e_v2",
+            default_mode=ExtractionMode.FULL_REFRESH,
+            refresh_frequency_hours=24,  # Refreshed daily
+        ),
+
+        # 🤖 HOMOLOGACION VOICEBOT
+        "raw_homologacion_voicebot": ExtractionConfig(
+            table_name="raw_homologacion_voicebot",
+            table_type=TableType.DIMENSION,
+            description="Homologation rules for Voicebot interactions",
+            primary_key=["bot_management", "bot_sub_management", "bot_compromiso"],
+            incremental_column=None,
+            source_table="homologacion_P3fV4dWNeMkN5RJMhV8e_voicebot",
+            default_mode=ExtractionMode.FULL_REFRESH,
+            refresh_frequency_hours=24,
+        ),
+
+        # 🤵 EJECUTIVOS (AGENTES)
+        "raw_ejecutivos": ExtractionConfig(
+            table_name="raw_ejecutivos",
+            table_type=TableType.DIMENSION,
+            description="Agent and executive information, mapping email to document ID",
+            primary_key=["correo_name"],
+            incremental_column=None,
+            source_table="sync_mibotair_batch_SYS_user",  # Filtered by client_id in query
+            default_mode=ExtractionMode.FULL_REFRESH,
+            refresh_frequency_hours=24,
         )
     }
     
@@ -167,7 +204,7 @@ class ETLConfig:
             periodo_date,                      -- ✅ Real field name (partition column)
             tipo_ciclo_campana,                -- ✅ Real field name
             categoria_duracion,                -- ✅ Real field name
-            CURRENT_TIMESTAMP() as extraction_timestamp
+            CURRENT_TIMESTAMP("America/Lima") as extraction_timestamp
         FROM `mibot-222814.BI_USA.bi_P3fV4dWNeMkN5RJMhV8e_dash_calendario_v5`
         WHERE {incremental_filter}
         """,
@@ -191,7 +228,7 @@ class ETLConfig:
             archivo,                                   -- ✅ Real field name
             creado_el,                                 -- ✅ Real field name
             DATE(creado_el) as fecha_asignacion,       -- ✅ Derived from creado_el (partition column)
-            CURRENT_TIMESTAMP() as extraction_timestamp
+            CURRENT_TIMESTAMP("America/Lima") as extraction_timestamp
         FROM `mibot-222814.BI_USA.batch_P3fV4dWNeMkN5RJMhV8e_asignacion`
         WHERE {incremental_filter}
         """,
@@ -207,7 +244,7 @@ class ETLConfig:
             creado_el,                                 -- ✅ Real field name
             DATE(creado_el) as fecha_proceso,          -- ✅ Derived from creado_el (partition column)
             motivo_rechazo,                            -- ✅ Real field name
-            CURRENT_TIMESTAMP() as extraction_timestamp
+            CURRENT_TIMESTAMP("America/Lima") as extraction_timestamp
         FROM `mibot-222814.BI_USA.batch_P3fV4dWNeMkN5RJMhV8e_tran_deuda`
         WHERE {incremental_filter}
           AND monto_exigible > 0
@@ -224,7 +261,7 @@ class ETLConfig:
             archivo,                                   -- ✅ Real field name
             creado_el,                                 -- ✅ Real field name
             motivo_rechazo,                            -- ✅ Real field name
-            CURRENT_TIMESTAMP() as extraction_timestamp
+            CURRENT_TIMESTAMP("America/Lima") as extraction_timestamp
         FROM `mibot-222814.BI_USA.batch_P3fV4dWNeMkN5RJMhV8e_pagos`
         WHERE {incremental_filter}
           AND monto_cancelado > 0
@@ -248,10 +285,53 @@ class ETLConfig:
             es_contacto_no_efectivo,                   -- ✅ Real field name (BOOLEAN)
             es_compromiso,                             -- ✅ Real field name (BOOLEAN)
             peso_gestion,                              -- ✅ Real field name (INT64)
-            CURRENT_TIMESTAMP() as extraction_timestamp
+            CURRENT_TIMESTAMP("America/Lima") as extraction_timestamp
         FROM `mibot-222814.BI_USA.bi_P3fV4dWNeMkN5RJMhV8e_vw_gestiones_unificadas`
         WHERE {incremental_filter}
-        """
+        """,
+        # 👨‍💼 HOMOLOGACION AGENTES (MIBOTAIR) - ✅ Explicit Columns
+        "raw_homologacion_mibotair": """
+         SELECT management,
+                n_1,
+                n_2,
+                n_3,
+                peso,
+                contactabilidad,
+                tipo_gestion,
+                codigo_rpta,
+                pdp,
+                gestor,
+                CURRENT_TIMESTAMP("America/Lima") as extraction_timestamp
+         FROM ` mibot-222814.BI_USA.homologacion_P3fV4dWNeMkN5RJMhV8e_v2 `
+         WHERE {incremental_filter} -- This will be 1=1 for full refresh
+         """,
+
+        # 🤖 HOMOLOGACION VOICEBOT - ✅ Explicit Columns
+        "raw_homologacion_voicebot": """
+         SELECT bot_management,
+                bot_sub_management,
+                bot_compromiso,
+                n1_homologado,
+                n2_homologado,
+                n3_homologado,
+                contactabilidad_homologada,
+                es_pdp_homologado,
+                peso_homologado,
+                CURRENT_TIMESTAMP("America/Lima") as extraction_timestamp
+         FROM ` mibot-222814.BI_USA.homologacion_P3fV4dWNeMkN5RJMhV8e_voicebot `
+         WHERE {incremental_filter} -- This will be 1=1 for full refresh
+         """,
+
+        # 🤵 EJECUTIVOS (AGENTES) - ✅ Explicit Columns & Business Filter
+        "raw_ejecutivos": """
+          SELECT DISTINCT correo_name,
+                          TRIM(nombre)        as nombre,
+                          document,
+                          CURRENT_TIMESTAMP("America/Lima") as extraction_timestamp
+          FROM ` mibot-222814.BI_USA.sync_mibotair_batch_SYS_user `
+          WHERE id_cliente = 145
+            AND {incremental_filter} -- This will be 1=1 for full refresh
+          """
     }
     
     # 🚨 GLOBAL SETTINGS
@@ -312,6 +392,9 @@ class ETLConfig:
             SQL WHERE clause for incremental extraction
         """
         config = cls.get_config(table_name)
+
+        if not config.incremental_column:
+            return "1=1"  # Devuelve un filtro que no hace nada
         
         # Apply lookback window for data quality
         lookback_date = since_date - timedelta(days=config.lookback_days)

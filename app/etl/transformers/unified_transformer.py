@@ -10,7 +10,7 @@ ARCHITECTURE:
 FIXED: Removed circular import completely - all transformers defined locally
 """
 
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, AsyncGenerator
 from app.etl.transformers.raw_data_transformer import get_raw_transformer_registry, RawTransformerRegistry
 from app.etl.transformers.business_logic_transformer import get_business_transformer, BusinessLogicTransformer
 from app.core.logging import LoggerMixin
@@ -264,6 +264,42 @@ class UnifiedTransformerRegistry(LoggerMixin):
             'stats': self.business_transformer.get_processing_stats() if self.supports_business_logic() else {},
             'description': 'Campaign window deduplication and KPI calculation'
         }
+
+        # En: app/etl/transformers/unified_transformer.py
+        # Dentro de la clase UnifiedTransformerRegistry
+
+    async def transform_stream(
+            self,
+            table_name: str,
+            data_stream: AsyncGenerator[List[Dict[str, Any]], None]
+    ) -> AsyncGenerator[List[Dict[str, Any]], None]:
+        """
+        Transforms a stream of data batches.
+
+        Takes an async generator of raw data batches and yields
+        an async generator of transformed data batches. This is the
+        memory-efficient way to handle transformations.
+
+        Args:
+            table_name: The name of the target table.
+            data_stream: An async generator yielding batches of raw data.
+
+        Yields:
+            A batch of transformed data.
+        """
+        self.logger.debug(f"Initiating stream transformation for {table_name}...")
+        self.reset_all_stats()  # Reset stats before starting a new stream
+
+        async for raw_batch in data_stream:
+            if not raw_batch:
+                continue
+
+            # Reuse the existing batch transformation logic
+            # This is efficient as it operates on one batch at a time
+            transformed_batch = self.transform_table_data(table_name, raw_batch)
+
+            if transformed_batch:
+                yield transformed_batch
 
 
 # 🎯 Global unified transformer instance

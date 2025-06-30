@@ -336,6 +336,58 @@ class BigQueryExtractor(LoggerMixin):
                 self.logger.error(f"Failed {table_name}: {str(e)}")
         
         return results
+
+    # En la clase BigQueryExtractor, añádelo después de extract_multiple_tables
+
+    async def run_custom_query_to_list(self, query: str) -> list[dict]:
+        """
+        Executes an arbitrary SQL query and returns all results in a single list.
+
+        NOTE: Use with caution, as this loads all results into memory.
+        Ideal for the CalendarDrivenCoordinator which processes one campaign at a time.
+
+        Args:
+            query: The SQL query string to execute.
+
+        Returns:
+            A list of dictionaries containing all rows from the query.
+        """
+        self.logger.info(f"Running custom query and collecting all results into memory...")
+
+        all_results = []
+        # Usamos el eficiente método de streaming interno para obtener los datos
+        async for batch in self._execute_query_streaming(query):
+            all_results.extend(batch)
+
+        self.logger.info(f"Custom query collected {len(all_results)} records.")
+        return all_results
+
+        # En: app/etl/extractors/bigquery_extractor.py
+        # Dentro de la clase BigQueryExtractor
+
+    async def stream_custom_query(
+            self,
+            query: str,
+            batch_size: int = 10000
+    ) -> AsyncGenerator[List[Dict[str, Any]], None]:
+        """
+        Executes an arbitrary SQL query and yields results in batches.
+        This is the preferred memory-efficient method for large queries.
+
+        Args:
+            query: The SQL query string to execute.
+            batch_size: The number of rows to fetch per batch.
+
+        Yields:
+            A batch of data as a list of dictionaries.
+        """
+        self.logger.info(f"Streaming custom query results with batch size {batch_size}...")
+        self.logger.debug(f"Query Snippet: {query[:500]}...")
+
+        # This method simply acts as a public entrypoint to the
+        # internal streaming logic that is already well-implemented.
+        async for batch in self._execute_query_streaming(query, batch_size):
+            yield batch
     
     async def test_query(self, query: str) -> Dict[str, Any]:
         """

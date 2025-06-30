@@ -29,6 +29,7 @@ from app.core.logging import LoggerMixin
 from app.models.base import success_response, error_response
 
 
+
 # =============================================================================
 # REQUEST/RESPONSE MODELS
 # =============================================================================
@@ -80,6 +81,26 @@ class CancelResponse(BaseModel):
     timestamp: datetime
 
 
+class CampaignCatchUpSummary(BaseModel):
+    status: str
+    campaigns_total: int
+    campaigns_processed: int
+    campaigns_successful: int
+    campaigns_partial: int
+    campaigns_failed: int
+    records_loaded_by_table: Dict[str, int]
+    duration_seconds: float
+    campaigns_per_minute: float
+
+class CampaignCatchUpResponse(BaseModel):
+    message: str
+    status: str
+    details: Optional[CampaignCatchUpSummary] = None
+
+class CampaignCatchUpTriggerResponse(BaseModel):
+    message: str
+    status: str
+    timestamp: datetime
 # =============================================================================
 # ROUTER SETUP - FIXED: Remove duplicate prefix
 # =============================================================================
@@ -464,7 +485,52 @@ class ETLAPI(LoggerMixin):
                 status_code=500,
                 detail=f"Failed to get table status: {str(e)}"
             )
-    
+
+    # =============================================================================
+    # 🧠 INTELLIGENT COORDINATOR ENDPOINTS
+    # =============================================================================
+
+    @staticmethod
+    @router.post(
+        "/catch-up/campaigns",
+        response_model=CampaignCatchUpTriggerResponse,
+        summary="Run Calendar-Driven ETL Catch-up"
+    )
+    async def trigger_campaign_catch_up(
+            background_tasks: BackgroundTasks,
+            force_refresh: bool = Query(False, description="Force reload of all campaign data"),
+            batch_size: int = Query(5, description="Number of campaigns to process in parallel"),
+            max_campaigns: Optional[int] = Query(None, description="Limit total campaigns to process")
+    ):
+        """
+        🧠 Trigger the intelligent, calendar-driven ETL process.
+
+        This is a powerful, long-running process that will:
+        1. Read the `raw_calendario` table for campaign windows.
+        2. For each campaign, load only the relevant data chunks from BigQuery.
+        3. This process runs in the background. Check logs for progress.
+        """
+        try:
+            # Aquí delegamos el trabajo pesado a una tarea en segundo plano.
+            # El patrón es idéntico al de `refresh_dashboard_data`.
+            background_tasks.add_task(
+                _execute_campaign_catch_up,
+                force_refresh=force_refresh,
+                batch_size=batch_size,
+                max_campaigns=max_campaigns
+            )
+
+            return CampaignCatchUpTriggerResponse(
+                message="Campaign catch-up process started in the background.",
+                status="started",
+                timestamp=datetime.now()
+            )
+
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to start campaign catch-up coordinator: {str(e)}"
+            )
     # =============================================================================
     # CONFIGURATION AND METADATA ENDPOINTS
     # =============================================================================
@@ -600,7 +666,7 @@ class ETLAPI(LoggerMixin):
 # =============================================================================
 # BACKGROUND TASK FUNCTIONS
 # =============================================================================
-
+from app.etl.coordinators.calendar_driven_coordinator import get_calendar_coordinator
 async def _execute_dashboard_refresh(
     force: bool = False, 
     tables: Optional[List[str]] = None,
@@ -659,6 +725,41 @@ def _get_mode_description(mode) -> str:
     }
     return descriptions.get(mode.value, "Unknown mode")
 
+
+async def _execute_campaign_catch_up(
+        force_refresh: bool,
+        batch_size: int,
+        max_campaigns: Optional[int]
+):
+    """Background task for calendar-driven campaign catch-up."""
+    print("🚀 Starting intelligent campaign catch-up...")
+    try:
+        # 1. Obtener la instancia del coordinador (usando el patrón singleton)
+        coordinator = get_calendar_coordinator()
+
+        # 2. Ejecutar la lógica principal
+        summary = await coordinator.catch_up_all_campaigns(
+            force_refresh=force_refresh,
+            batch_size=batch_size,
+            max_campaigns=max_campaigns
+        )
+
+        # 3. Registrar el resultado (en los logs de la aplicación)
+        print(f"✅ Campaign catch-up completed. Status: {summary.get('status')}")
+        print(f"📊 Summary: {summary}")
+
+    except Exception as e:
+        print(f"❌ Campaign catch-up process failed: {str(e)}")
+
+@router.post("/catch-up/campaigns/cancel", status_code=202)
+async def cancel_campaign_catch_up():
+    """
+    🛑 Signals the running campaign catch-up process to stop gracefully.
+    The process will finish its current batch and then exit.
+    """
+    coordinator = get_calendar_coordinator()
+    coordinator.cancel()
+    return {"message": "Cancellation signal sent. Process will stop after the current batch."}
 
 # =============================================================================
 # REGISTER API ROUTES
