@@ -174,3 +174,130 @@ LEFT JOIN gestiones_impact gi
 WHERE am.cuentas > 0  -- Only portfolios with actual assignments
 
 ORDER BY am.periodo DESC, am.archivo, am.cartera
+
+
+-----------------------------------
+-- =====================================================
+-- UPSERT ASSIGNMENT DATA desde cuenta_estado_diario
+-- Agregación por periodo (YYYY-MM) y cartera
+-- =====================================================
+
+WITH cuentas_con_ranking AS (SELECT TO_CHAR(ced.fecha_proceso, 'YYYY-MM') AS periodo,
+                                    ced.archivo_campana                   AS archivo,
+                                    CASE
+                                        WHEN ced.archivo_campana LIKE '%CF%' THEN 'CUOTA_FRACCION'
+                                        WHEN ced.archivo_campana LIKE '%AN%' THEN 'ALTAS'
+                                        ELSE 'TEMPRANA'
+                                        END                               AS cartera,
+                                    ced.cuenta,
+                                    ced.cod_luna,
+                                    servicio,
+                                    ced.fecha_vencimiento,
+                                    ced.monto_exigible,
+                                    ced.monto_saldo_actual,
+
+                                    -- Ranking para identificar primer y último día del periodo por cuenta
+                                    ROW_NUMBER() OVER (
+                                        PARTITION BY ced.cuenta, TO_CHAR(ced.fecha_proceso, 'YYYY-MM')
+                                        ORDER BY ced.fecha_proceso
+                                        )                                 AS rn_primero,
+
+                                    ROW_NUMBER() OVER (
+                                        PARTITION BY ced.cuenta, TO_CHAR(ced.fecha_proceso, 'YYYY-MM')
+                                        ORDER BY ced.fecha_proceso DESC
+                                        )                                 AS rn_ultimo
+
+                             FROM aux_p3fv4dwnemkn5rjmhv8e.cuenta_estado_diario ced
+                             WHERE ced.fecha_proceso >= DATE_TRUNC('month', CURRENT_DATE - INTERVAL '12 months')),
+
+     datos_assignment AS (SELECT periodo,
+                                 archivo,
+                                 cartera,
+                                 servicio,
+                                 fecha_vencimiento,
+
+                                 -- Clientes y cuentas únicos
+                                 COUNT(DISTINCT cod_luna)                                        AS clientes,
+                                 COUNT(DISTINCT cuenta)                                          AS cuentas,
+
+                                 -- Deuda asignada (suma de primeros días)
+                                 SUM(CASE WHEN rn_primero = 1 THEN monto_exigible ELSE 0 END)    AS deuda_asig,
+
+                                 -- Deuda actual (suma de últimos días)
+                                 SUM(CASE WHEN rn_ultimo = 1 THEN monto_saldo_actual ELSE 0 END) AS deuda_actual
+
+                          FROM cuentas_con_ranking
+                          GROUP BY periodo, archivo, cartera, fecha_vencimiento, servicio),
+
+     datos_finales AS (SELECT periodo,
+                              archivo,
+                              cartera,
+                              servicio,
+                              fecha_vencimiento,
+                              clientes,
+                              cuentas,
+                              deuda_asig,
+                              deuda_actual,
+                              CASE
+                                  WHEN cuentas > 0 THEN ROUND((deuda_asig / cuentas)::NUMERIC, 2)
+                                  ELSE 0
+                                  END AS ticket_promedio
+                       FROM datos_assignment)
+
+-- UPSERT en assignment_data
+INSERT
+INTO mart_p3fv4dwnemkn5rjmhv8e.assignment_data (periodo,
+                                                archivo,
+                                                cartera,
+                                                servicio,
+                                                fecha_vencimiento,
+                                                clientes,
+                                                cuentas,
+                                                deuda_asig,
+                                                deuda_actual,
+                                                ticket_promedio,
+                                                fecha_procesamiento,
+                                                created_at,
+                                                updated_at)
+SELECT periodo,
+       archivo,
+       cartera,
+       servicio,
+       fecha_vencimiento,
+       clientes,
+       cuentas,
+       deuda_asig,
+       deuda_actual,
+       ticket_promedio,
+       NOW() AS fecha_procesamiento,
+       NOW() AS created_at,
+       NOW() AS updated_at
+FROM datos_finales
+
+-- Si existe, actualizar
+ON CONFLICT (periodo, archivo, cartera, servicio, fecha_vencimiento)
+    DO UPDATE SET clientes            = EXCLUDED.clientes,
+                  cuentas             = EXCLUDED.cuentas,
+                  deuda_asig          = EXCLUDED.deuda_asig,
+                  deuda_actual        = EXCLUDED.deuda_actual,
+                  ticket_promedio     = EXCLUDED.ticket_promedio,
+                  fecha_procesamiento = EXCLUDED.fecha_procesamiento,
+                  updated_at          = NOW();
+
+-- =====================================================
+-- CONSULTA DE VERIFICACIÓN
+-- =====================================================
+
+-- Ver los resultados insertados
+SELECT periodo,
+       cartera,
+       COUNT(*)                                as archivos,
+       SUM(clientes)                           as total_clientes,
+       SUM(cuentas)                            as total_cuentas,
+       ROUND(SUM(deuda_asig)::NUMERIC, 2)      as total_deuda_asig,
+       ROUND(SUM(deuda_actual)::NUMERIC, 2)    as total_deuda_actual,
+       ROUND(AVG(ticket_promedio)::NUMERIC, 2) as ticket_promedio_avg
+FROM mart_p3fv4dwnemkn5rjmhv8e.assignment_data
+WHERE periodo >= TO_CHAR(CURRENT_DATE - INTERVAL '6 months', 'YYYY-MM')
+GROUP BY periodo, cartera
+ORDER BY periodo DESC, cartera;

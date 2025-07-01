@@ -46,29 +46,6 @@ CREATE TRIGGER trg_cuenta_campana_state_updated_at
     EXECUTE FUNCTION public.update_timestamp_column();
 
 -- =============================================================================
--- Tabla: gestiones_unificadas (Copia de la migración 007 para completitud)
--- Propósito: Tabla intermedia que unifica las gestiones de Voicebot y MibotAir.
--- =============================================================================
-CREATE TABLE IF NOT EXISTS aux_P3fV4dWNeMkN5RJMhV8e.gestiones_unificadas (
-    gestion_uid TEXT PRIMARY KEY,
-    cod_luna TEXT NOT NULL,
-    timestamp_gestion TIMESTAMPTZ NOT NULL,
-    fecha_gestion DATE NOT NULL,
-    canal_origen TEXT NOT NULL,
-    contactabilidad TEXT,
-    es_contacto_efectivo BOOLEAN DEFAULT FALSE,
-    es_compromiso BOOLEAN DEFAULT FALSE,
-    peso_gestion INTEGER DEFAULT 1,
-    archivo_campana TEXT NOT NULL,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
-);
-COMMENT ON TABLE aux_P3fV4dWNeMkN5RJMhV8e.gestiones_unificadas IS 'Unified and cleaned gestiones data from all channels. Populated once per campaign.';
-
-CREATE INDEX IF NOT EXISTS idx_aux_gu_fecha_gestion ON aux_P3fV4dWNeMkN5RJMhV8e.gestiones_unificadas(fecha_gestion);
-CREATE INDEX IF NOT EXISTS idx_aux_gu_archivo_campana ON aux_P3fV4dWNeMkN5RJMhV8e.gestiones_unificadas(archivo_campana);
-
--- =============================================================================
 -- Tabla: gestion_cuenta_impact (sin cambios, ya era robusta)
 -- =============================================================================
 CREATE TABLE IF NOT EXISTS aux_P3fV4dWNeMkN5RJMhV8e.gestion_cuenta_impact (

@@ -78,10 +78,13 @@ CREATE TRIGGER trigger_mart_ed_updated_at
 
 -- Mart Assignment Data (from original 005-create-assignment-data-table)
 -- This table does not seem to be time-series in the same way, uses 'periodo' (YYYY-MM). Not making it a hypertable.
+
 CREATE TABLE IF NOT EXISTS mart_P3fV4dWNeMkN5RJMhV8e.assignment_data (
     periodo VARCHAR(7) NOT NULL,
     archivo VARCHAR(100) NOT NULL,
     cartera VARCHAR(50) NOT NULL,
+    servicio varchar(20) NOT NULL CHECK ( servicio in('FIJA', 'MOVIL') ),
+    fecha_vencimiento DATE NOT NULL,                         -- Vencimiento de la deuda
     clientes INTEGER NOT NULL DEFAULT 0,
     cuentas INTEGER NOT NULL DEFAULT 0,
     deuda_asig FLOAT NOT NULL DEFAULT 0.0,
@@ -90,7 +93,7 @@ CREATE TABLE IF NOT EXISTS mart_P3fV4dWNeMkN5RJMhV8e.assignment_data (
     fecha_procesamiento TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (periodo, archivo, cartera)
+    PRIMARY KEY (periodo, archivo, cartera,servicio,fecha_vencimiento)
 );
 COMMENT ON TABLE mart_P3fV4dWNeMkN5RJMhV8e.assignment_data IS 'Assignment composition data by period and portfolio for project P3fV4dWNeMkN5RJMhV8e.';
 CREATE INDEX IF NOT EXISTS idx_mart_ad_periodo ON mart_P3fV4dWNeMkN5RJMhV8e.assignment_data(periodo);

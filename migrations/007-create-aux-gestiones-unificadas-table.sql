@@ -1,20 +1,27 @@
 -- 007: Create unified gestiones table in the auxiliary schema for project P3fV4dWNeMkN5RJMhV8e
 -- depends: 006-create-aux-tables
+
+--DROP TABLE aux_P3fV4dWNeMkN5RJMhV8e.gestiones_unificadas;
+
 CREATE TABLE IF NOT EXISTS aux_P3fV4dWNeMkN5RJMhV8e.gestiones_unificadas (
     -- Core identification
     gestion_uid TEXT NOT NULL, -- UID from the source table
     timestamp_gestion TIMESTAMPTZ NOT NULL, -- Time partitioning column
     cod_luna TEXT NOT NULL,
+    cuenta TEXT NOT NULL,
     fecha_gestion DATE NOT NULL,
 
     -- Channel information
-    canal_origen TEXT NOT NULL CHECK (canal_origen IN ('BOT', 'HUMANO')),
+    canal_origen TEXT NOT NULL CHECK (canal_origen IN ('BOT', 'CALL')),
+    nombre_agente TEXT,
+    documento_agente TEXT NULL DEFAULT 'SIN DOCUMENTO',
 
     -- Homologated classification
     nivel_1 TEXT,
     nivel_2 TEXT,
     nivel_3 TEXT,
     contactabilidad TEXT,
+    peso int,
 
     -- Business flags for KPI calculation
     es_contacto_efectivo BOOLEAN DEFAULT FALSE,
@@ -28,7 +35,7 @@ CREATE TABLE IF NOT EXISTS aux_P3fV4dWNeMkN5RJMhV8e.gestiones_unificadas (
     updated_at TIMESTAMPTZ DEFAULT NOW(),
 
     -- ✅ CORRECCIÓN: La clave primaria ahora es compuesta e incluye la columna de particionamiento.
-    PRIMARY KEY (gestion_uid, timestamp_gestion),
+    PRIMARY KEY (gestion_uid, timestamp_gestion, cuenta),
 
     -- Constraint para asegurar consistencia
     CONSTRAINT chk_aux_gu_fecha_consistency CHECK (fecha_gestion = DATE(timestamp_gestion))
