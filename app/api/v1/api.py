@@ -11,6 +11,7 @@ from app.api.v1.endpoints.assignment import router as assignment_router
 from app.api.v1.endpoints.operation import router as operation_router
 from app.api.v1.endpoints.productivity import router as productivity_router
 from app.api.v1.endpoints.etl import router as etl_router
+from app.api.v1.endpoints.users import router as users_router
 
 # Create main API router
 api_router = APIRouter()
@@ -22,6 +23,7 @@ api_router.include_router(assignment_router, tags=["assignment"])
 api_router.include_router(operation_router, tags=["operation"])
 api_router.include_router(productivity_router, tags=["productivity"])
 api_router.include_router(etl_router, tags=["etl"])
+api_router.include_router(users_router, tags=["users"])
 
 # Add health check endpoint at API level
 @api_router.get("/health")
@@ -38,7 +40,8 @@ async def api_health():
             "assignment": "/assignment - Análisis de composición de cartera",
             "operation": "/operation - Análisis operativo diario del call center",
             "productivity": "/productivity - Análisis de productividad de agentes",
-            "etl": "/etl - Sistema de extracción incremental de datos"
+            "etl": "/etl - Sistema de extracción incremental de datos",
+            "users": "/users - Gestión de usuarios y permisos"
         },
         "features": {
             "database_agnostic": "Preparado para migración BigQuery → PostgreSQL",
@@ -46,7 +49,8 @@ async def api_health():
             "caching": "Redis cache integrado para performance",
             "filtering": "Filtros por cartera, servicio, fechas",
             "real_time": "Datos con refresh bajo demanda",
-            "agent_tracking": "Monitoreo de productividad por agente"
+            "agent_tracking": "Monitoreo de productividad por agente",
+            "user_management": "Sistema completo de gestión de usuarios"
         },
         "openapi_docs": "/docs"
     }
@@ -66,7 +70,8 @@ async def api_info():
             "database": "BigQuery → PostgreSQL (incremental migration)",
             "cache": "Redis",
             "processing": "Python pandas + numpy",
-            "etl": "Production-ready incremental extraction system"
+            "etl": "Production-ready incremental extraction system",
+            "auth": "JWT-based authentication with role-based access control"
         },
         "endpoints": {
             "/api/v1/dashboard": {
@@ -98,6 +103,15 @@ async def api_info():
                 "description": "Sistema de extracción incremental de datos",
                 "methods": ["GET", "POST"],
                 "features": ["dashboard_refresh", "table_monitoring", "watermark_tracking", "background_processing"]
+            },
+            "/api/v1/users": {
+                "description": "Gestión completa de usuarios y permisos",
+                "methods": ["GET", "POST", "PUT", "DELETE"],
+                "features": [
+                    "crud_operations", "role_management", "permission_control",
+                    "bulk_operations", "user_statistics", "profile_management",
+                    "password_security", "audit_logging", "export_functionality"
+                ]
             }
         },
         "data_sources": {
@@ -105,7 +119,8 @@ async def api_info():
             "tran_deuda": "Transacciones de deuda evolutiva", 
             "gestiones_bot": "Gestiones automatizadas del voicebot",
             "gestiones_humano": "Gestiones manuales del call center",
-            "pagos": "Transacciones de recupero y pagos"
+            "pagos": "Transacciones de recupero y pagos",
+            "users": "Sistema de usuarios y permisos"
         },
         "etl_capabilities": {
             "extraction_modes": ["incremental", "full_refresh", "sliding_window"],
@@ -114,14 +129,36 @@ async def api_info():
             "recovery": "Automatic cleanup and recovery from failed extractions",
             "concurrency": "Configurable concurrent processing limits"
         },
+        "user_management": {
+            "authentication": "JWT-based with bcrypt password hashing",
+            "authorization": "Role-based access control (RBAC)",
+            "roles": ["admin", "manager", "analyst", "viewer"],
+            "features": [
+                "User CRUD operations",
+                "Profile self-management",
+                "Role and permission management",
+                "Password security validation",
+                "Bulk user operations",
+                "User statistics and analytics",
+                "Audit logging",
+                "Data export functionality"
+            ],
+            "security": {
+                "password_requirements": "Minimum 8 chars, uppercase, lowercase, number",
+                "soft_delete": "Users are deactivated, not permanently deleted",
+                "session_management": "JWT token-based sessions",
+                "permission_checks": "Granular permission validation"
+            }
+        },
         "refresh_schedule": "On-demand via API trigger (incremental)",
         "target_users": "Equipo de cobranzas Telefónica",
         "frontend": "React TypeScript dashboard (Pulso-Dash)",
         "integration": {
-            "status": "Fully integrated with Pulso-Dash frontend + ETL system",
-            "authentication": "Optional API key support",
+            "status": "Fully integrated with Pulso-Dash frontend + ETL system + User Management",
+            "authentication": "JWT + API key support",
             "cors": "Configured for cross-origin requests",
             "documentation": "OpenAPI/Swagger at /docs",
-            "etl_triggering": "HTTP endpoints for triggering data refreshes"
+            "etl_triggering": "HTTP endpoints for triggering data refreshes",
+            "user_management": "Complete user administration system"
         }
     }
