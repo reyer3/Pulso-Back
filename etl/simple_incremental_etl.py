@@ -19,49 +19,12 @@ import logging
 from etl.extractors.bigquery_extractor import BigQueryExtractor
 from etl.loaders.postgres_loader import PostgresLoader
 from etl.config import ETLConfig
-from shared.database.connection import get_database_manager, execute_query
-
-
-class SimpleWatermarkManager:
-    """Watermark manager simplificado - solo última fecha extraída"""
-    
-    def __init__(self):
-        self.logger = logging.getLogger(__name__)
-    
-    async def ensure_watermark_table(self) -> None:
-        """Crear tabla de watermarks simplificada"""
-        create_table_sql = """
-        CREATE TABLE IF NOT EXISTS etl_watermarks_simple (
-            table_name VARCHAR(100) PRIMARY KEY,
-            last_extracted_at TIMESTAMP WITH TIME ZONE NOT NULL,
-            updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-        );
-        """
-        await execute_query(create_table_sql)
-        self.logger.info("✅ Simple watermark table ready")
-    
-    async def get_last_extracted_date(self, table_name: str) -> Optional[datetime]:
-        """Obtener última fecha extraída"""
-        query = """
-        SELECT last_extracted_at 
-        FROM etl_watermarks_simple 
-        WHERE table_name = $1
-        """
-        row = await execute_query(query, table_name, fetch="one")
-        return row['last_extracted_at'] if row else None
-    
-    async def update_watermark(self, table_name: str, extracted_until: datetime) -> None:
-        """Actualizar watermark después de extracción exitosa"""
-        upsert_sql = """
-        INSERT INTO etl_watermarks_simple (table_name, last_extracted_at, updated_at) 
-        VALUES ($1, $2, CURRENT_TIMESTAMP)
-        ON CONFLICT (table_name) 
-        DO UPDATE SET 
-            last_extracted_at = $2,
-            updated_at = CURRENT_TIMESTAMP
-        """
-        await execute_query(upsert_sql, table_name, extracted_until)
-        self.logger.info(f"✅ Watermark updated: {table_name} -> {extracted_until}")
+from etl.watermarks import (
+    ensure_watermark_table,
+    get_last_extracted_date,
+    update_watermark
+)
+from shared.database.connection import get_database_manager
 
 
 class SimpleIncrementalETL:
@@ -69,13 +32,12 @@ class SimpleIncrementalETL:
     
     def __init__(self):
         self.extractor = BigQueryExtractor()
-        self.watermark_manager = SimpleWatermarkManager()
         self.logger = logging.getLogger(__name__)
         self.loader = None
     
     async def init(self):
         """Inicializar componentes"""
-        await self.watermark_manager.ensure_watermark_table()
+        await ensure_watermark_table()
         db_manager = await get_database_manager()
         self.loader = PostgresLoader(db_manager)
     
@@ -86,7 +48,7 @@ class SimpleIncrementalETL:
         config = ETLConfig.get_config(table_name)
         
         # Obtener último watermark
-        last_extracted = await self.watermark_manager.get_last_extracted_date(table_name)
+        last_extracted = await get_last_extracted_date(table_name)
         
         # Determinar rango de extracción
         if last_extracted:
@@ -191,7 +153,7 @@ class SimpleIncrementalETL:
             
             # 3. Actualizar watermark SOLO si la carga fue exitosa
             if load_result.get("records_loaded", 0) > 0:
-                await self.watermark_manager.update_watermark(
+                await update_watermark(
                     table_name, 
                     extraction_result["end_date"]
                 )
