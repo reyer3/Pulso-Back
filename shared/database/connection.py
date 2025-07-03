@@ -105,7 +105,8 @@ class DatabaseManager:
                 return await conn.fetchval(query, *args)
             else:
                 raise ValueError(f"Invalid fetch type: {fetch}")
-    
+        return None
+
     async def execute_transaction(self, queries: List[tuple]) -> None:
         """
         Execute multiple queries in a transaction
