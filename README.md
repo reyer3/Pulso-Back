@@ -1,37 +1,33 @@
-# 🚀 Pulso-Back: API + ETL Backend
+# 🚀 Pulso-Back: API + ETL Backend (SIMPLIFICADO)
 
-**API + ETL Backend para Dashboard Cobranzas Telefónica**
+**API + ETL Backend Simplificado para Dashboard Cobranzas Telefónica**
 
-FastAPI + Redis + PostgreSQL + BigQuery con patrones KISS y DRY
+FastAPI + Redis + PostgreSQL + BigQuery con ETL Incremental Puro
 
-## 🏗️ Arquitectura
+## 🏗️ Arquitectura Simplificada
 
 ```
-BigQuery → ETL Pipeline → Redis Cache → FastAPI → React Dashboard
+BigQuery → ETL Incremental → PostgreSQL → FastAPI → React Dashboard
                 ↓
-            PostgreSQL (persistencia)
+        Watermarks Simples (solo última fecha)
 ```
 
 ## 🎯 Stack Tecnológico
 
 - **FastAPI** - API REST con OpenAPI automático
 - **Redis** - Cache de consultas frecuentes
-- **PostgreSQL (asyncpg)** - Storage para ETL (acceso con `asyncpg`)
-- **BigQuery (`google-cloud-bigquery`)** - Source of truth (acceso directo con cliente oficial)
-- **Docker** - Containerización
-- **Traefik** - Reverse proxy
-- **Celery** - Job scheduling
-- **Prometheus** - Monitoring
+- **PostgreSQL (asyncpg)** - Storage para ETL
+- **BigQuery** - Source of truth
+- **ETL Incremental** - Solo datos nuevos sin lógicas complejas
 
-## 📊 Patrones de Diseño
+## 🔄 ETL Incremental Simplificado
 
-- **Repository Pattern** - Abstracción de acceso a datos
-- **Service Pattern** - Lógica de negocio encapsulada
-- **Factory Pattern** - Creación de objetos
-- **Dependency Injection** - Inversión de control
-- **Strategy Pattern** - Algoritmos intercambiables
-- **Cache-Aside Pattern** - Estrategia de cache
-- **Template Method Pattern** - Pipelines ETL
+**Características:**
+- ✅ **Watermarks simples**: Solo última fecha extraída por tabla
+- ✅ **Incremental puro**: `WHERE fecha > última_fecha_extraída`
+- ✅ **Sin lógicas de negocio**: Solo extracción y carga
+- ✅ **Sin campañas complejas**: Directo por fechas
+- ✅ **Debuggeable**: Un solo archivo, lógica lineal
 
 ## 🚀 Quick Start
 
@@ -40,18 +36,14 @@ BigQuery → ETL Pipeline → Redis Cache → FastAPI → React Dashboard
 git clone https://github.com/reyer3/Pulso-Back.git
 cd Pulso-Back
 
-# 2. Configurar ambiente
-cp .env.example .env
-# Editar .env con tus credenciales
+# 2. ETL Incremental
+python etl/simple_incremental_etl.py --tables asignaciones trandeuda pagos
 
-# 3. Levantar con Docker
-docker-compose up -d
-
-# 4. Verificar API
+# 3. Verificar API
 curl http://localhost:8000/health
 ```
 
-## 📁 Estructura del Proyecto
+## 📁 Estructura Simplificada
 
 ```
 pulso-back/
@@ -62,22 +54,50 @@ pulso-back/
 │   ├── repositories/      # Data access layer
 │   ├── services/          # Business logic
 │   └── utils/             # Utilities
-├── etl/                   # ETL Pipeline
-│   ├── extractors/        # Data extraction
-│   ├── transformers/      # Data transformation  
-│   ├── loaders/           # Data loading
-│   └── pipelines/         # ETL orchestration
-├── docker/                # Docker configs
-├── scripts/               # Deployment scripts
+├── etl/                   # ETL Simplificado
+│   ├── simple_incremental_etl.py  # 🆕 ETL principal
+│   ├── extractors/        # BigQuery extraction
+│   ├── loaders/           # PostgreSQL loading
+│   ├── sql/               # SQL queries
+│   └── config.py          # Table configuration
+├── scripts/               # Deployment & cleanup
 └── tests/                 # Testing
 ```
 
-## 🔄 ETL Pipeline
+## 🔄 ETL Incremental
 
-**Refresh cada 3 horas:**
-1. **Extract** - BigQuery views
-2. **Transform** - Agregaciones y cálculos
-3. **Load** - Redis cache + PostgreSQL
+**Ejecutar ETL:**
+
+```bash
+# Todas las tablas
+python etl/simple_incremental_etl.py
+
+# Tablas específicas
+python etl/simple_incremental_etl.py --tables asignaciones trandeuda pagos
+
+# Con debug
+python etl/simple_incremental_etl.py --log-level DEBUG
+```
+
+**Cómo funciona:**
+1. **Lee watermark**: Última fecha extraída por tabla
+2. **Extrae incremental**: `WHERE fecha > watermark`
+3. **Carga datos**: UPSERT a PostgreSQL
+4. **Actualiza watermark**: Nueva fecha máxima
+
+## 📊 Watermarks Simples
+
+```sql
+-- Ver estado de watermarks
+SELECT table_name, last_extracted_at, updated_at 
+FROM etl_watermarks_simple 
+ORDER BY updated_at DESC;
+
+-- Reset manual de watermark
+UPDATE etl_watermarks_simple 
+SET last_extracted_at = '2025-07-01 00:00:00+00'
+WHERE table_name = 'asignaciones';
+```
 
 ## 📋 API Endpoints
 
@@ -89,20 +109,37 @@ GET  /api/v1/health        # Health check
 GET  /docs                 # OpenAPI docs
 ```
 
-## 🐳 Docker & Traefik
+## 🧹 Limpieza de Archivos
 
-Integrado con tu stack existente:
-- **Traefik** - Routing automático
-- **Redis** - Reutiliza tu instancia
-- **PostgreSQL** - Nuevo servicio (usando `asyncpg`, no `psycopg2`)
+Se eliminaron componentes complejos innecesarios:
+- ❌ `campaign_catchup_pipeline.py`
+- ❌ `hybrid_raw_pipeline.py`
+- ❌ `mart_build_pipeline.py`
+- ❌ `dependencies.py` (complejo)
+- ❌ `watermarks.py` (complejo)
 
-**Nota importante sobre dependencias de base de datos:** El backend solo usa BigQuery (via `google-cloud-bigquery`) y PostgreSQL (via `asyncpg`). No hay dependencia de `psycopg2` ni de SQLAlchemy para el acceso en tiempo de ejecución a PostgreSQL. SQLAlchemy puede seguir usándose para migraciones con Alembic si es necesario.
+**Mantenidos:**
+- ✅ `simple_incremental_etl.py`
+- ✅ `extractors/` y `loaders/`
+- ✅ `config.py` y `sql/`
 
-## 📊 Monitoring
+## 🎯 Ventajas de la Simplificación
 
-- **Prometheus** - Métricas
-- **Grafana** - Dashboards
-- **Logs** - Structured logging
+1. **ETL Predecible**: Solo extrae datos nuevos desde watermark
+2. **Debugging Simple**: Un archivo, lógica lineal
+3. **Sin Race Conditions**: Watermarks atómicos
+4. **Performance**: Solo datos incrementales
+5. **Mantenible**: Código claro y directo
+
+## 🐳 Docker & Deploy
+
+```bash
+# Production deploy
+./scripts/deploy.sh production
+
+# ETL en contenedor
+docker run pulso-back python etl/simple_incremental_etl.py
+```
 
 ## 🧪 Testing
 
@@ -110,55 +147,11 @@ Integrado con tu stack existente:
 # Unit tests
 pytest tests/unit/
 
-# Integration tests  
-pytest tests/integration/
-
-# Coverage
-pytest --cov=app
-```
-
-## 🚀 Deploy
-
-```bash
-# Production deploy
-./scripts/deploy.sh production
-
-# Staging deploy
-./scripts/deploy.sh staging
+# ETL test
+python etl/simple_incremental_etl.py --tables calendario --log-level DEBUG
 ```
 
 ---
-**Creado por Ricardo Reyes para Onbotgo**
+**Simplificado por Ricardo Reyes para Onbotgo**
 
-#!/usr/bin/env bash
-set -euo pipefail
-
-PROJECT="BI_USA"
-LOCATION="us-east1"
-
-TABLES=(
-  "voicebot_P3fV4dWNeMkN5RJMhV8e"
-  "batch_P3fV4dWNeMkN5RJMhV8e_pagos"
-  "batch_P3fV4dWNeMkN5RJMhV8e_tran_deuda"
-  "mibotair_P3fV4dWNeMkN5RJMhV8e"
-  "bi_P3fV4dWNeMkN5RJMhV8e_dash_calendario_v5"
-)
-
-echo "🚀 EDA simple  • Proyecto: $PROJECT  • Región: $LOCATION"
-for t in "${TABLES[@]}"; do
-  FULL="$PROJECT.$t"
-  echo "=================================================="
-  echo "🔹 Tabla: $FULL"
-
-  echo "📌 Esquema bruto:"
-  bq --location="$LOCATION" show --format=prettyjson "$FULL"
-
-  echo -e "\n📌 Total de filas:"
-  bq --location="$LOCATION" query --quiet --nouse_legacy_sql --format=json \
-    "SELECT COUNT(*) AS total FROM \`$FULL\`"
-
-  echo -e "\n📌 Muestra (5 filas):"
-  bq --location="$LOCATION" head --max_rows=5 "$FULL"
-  echo
-done
-echo "✅ Terminado."
+> 🎯 **Filosofía**: ETL incremental puro sin abstracciones innecesarias
